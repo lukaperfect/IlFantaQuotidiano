@@ -257,6 +257,13 @@ test lo dimostra: stessa giornata, stesso snapshot. Non è eleganza fine a sé
 stessa — è ciò che rende vera la frase «abbiamo un percorso di riserva». Se le
 due vie divergessero, il ripiego produrrebbe un prodotto diverso.
 
+**Un file sbagliato deve dire cosa non andava.** È il modo più probabile di
+fallire su questo percorso: una colonna con un altro nome, una riga senza
+`playerId`, dieci titolari invece di undici. L'importatore lo sa dire con
+precisione — «Riga 2 dei voti senza playerId» — e quei messaggi finivano tutti
+inghiottiti da una pagina d'errore generica, lasciando come unica strategia
+possibile rinunciare. Ora tornano inline sul modulo, che è dove servono.
+
 **L'interruttore di emergenza si deve poter azionare.** Il percorso da CSV è
 ciò che tiene in piedi il prodotto se la piattaforma chiude gli accessi. Ma il
 modulo chiedeva cinque file senza dire una parola su quali colonne servissero:

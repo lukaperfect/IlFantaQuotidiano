@@ -10,7 +10,9 @@ import {
 } from '@fantacomics/auth';
 import { authStore } from '@/lib/store';
 import { requireAccount, startSession, NONCE_COOKIE } from '@/lib/session';
-import { importFromFiles, generateWorld, withOfficialScores, nudgeTeamToScore } from '@fantacomics/ingest';
+import {
+  importFromFiles, generateWorld, withOfficialScores, nudgeTeamToScore, AdapterError,
+} from '@fantacomics/ingest';
 import { runMatchdayPipeline } from '@fantacomics/pipeline';
 import { TemplateDriver, AnthropicDriver } from '@fantacomics/llm';
 import { store } from '@/lib/store';
@@ -124,8 +126,43 @@ async function fileText(form: FormData, field: string): Promise<string> {
   return typeof value === 'string' ? value : '';
 }
 
+export type EsitoCreazione = { ok: boolean; messaggio: string };
+
+/**
+ * Perche' questa azione restituisce un esito invece di lasciar esplodere.
+ *
+ * Il modo piu' probabile di fallire qui e' un CSV che non corrisponde: una
+ * colonna con un altro nome, una riga senza playerId, dieci titolari invece di
+ * undici. L'importatore lo sa dire con precisione — "Riga 5 dei voti senza
+ * playerId", "La squadra t3 ha 10 titolari invece di 11" — e quei messaggi
+ * finivano tutti inghiottiti da una pagina d'errore generica.
+ *
+ * E' il caso in cui il messaggio giusto vale piu' di qualunque altra cosa:
+ * chi carica i file non ha modo di indovinare cosa non andava, e senza quel
+ * dettaglio l'unica strategia rimasta e' rinunciare.
+ */
+async function conEsito(lavoro: () => Promise<string>): Promise<EsitoCreazione | never> {
+  let destinazione: string;
+  try {
+    destinazione = await lavoro();
+  } catch (e) {
+    if (e instanceof AdapterError) return { ok: false, messaggio: e.message };
+    return {
+      ok: false,
+      messaggio: e instanceof Error ? e.message : 'Errore sconosciuto durante l\u2019import.',
+    };
+  }
+  // Fuori dal try: `redirect` funziona lanciando, e catturarlo qui lo
+  // trasformerebbe in un errore da mostrare all'utente.
+  redirect(destinazione);
+}
+
 /** Crea una lega dai CSV esportati dalla piattaforma. */
-export async function creaLegaDaFile(form: FormData): Promise<void> {
+export async function creaLegaDaFile(
+  _precedente: EsitoCreazione | null,
+  form: FormData,
+): Promise<EsitoCreazione> {
+  return conEsito(async () => {
   const account = await requireAccount();
   const leagueName = safeName(String(form.get('leagueName') ?? ''), 60);
   const matchday = Number(form.get('matchday') ?? 1);
@@ -163,7 +200,8 @@ export async function creaLegaDaFile(form: FormData): Promise<void> {
   });
 
   revalidatePath('/');
-  redirect(`/lega/${leagueId}`);
+  return `/lega/${leagueId}`;
+  });
 }
 
 /**
@@ -172,7 +210,11 @@ export async function creaLegaDaFile(form: FormData): Promise<void> {
  * esportare cinque CSV prima di avergli fatto vedere il prodotto e' il modo
  * piu' sicuro di perderlo.
  */
-export async function creaLegaDiProva(form: FormData): Promise<void> {
+export async function creaLegaDiProva(
+  _precedente: EsitoCreazione | null,
+  form: FormData,
+): Promise<EsitoCreazione> {
+  return conEsito(async () => {
   const account = await requireAccount();
   const leagueName = safeName(String(form.get('leagueName') ?? 'Lega di prova'), 60);
   const teams = Math.max(4, Math.min(12, Number(form.get('teams') ?? 8)));
@@ -204,7 +246,8 @@ export async function creaLegaDiProva(form: FormData): Promise<void> {
   }
 
   revalidatePath('/');
-  redirect(`/lega/${leagueId}`);
+  return `/lega/${leagueId}`;
+  });
 }
 
 export type EsitoConfigurazione = { ok: boolean; messaggio: string };

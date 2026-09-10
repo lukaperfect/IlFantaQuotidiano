@@ -200,6 +200,33 @@ const pezziDaFile = await mario.page.locator('.card-list li').count();
 ok('una lega nata dai soli modelli produce un giornale', pezziDaFile >= 1,
    `${pezziDaFile} edizioni`);
 
+/**
+ * E un file sbagliato deve DIRE cosa non andava.
+ *
+ * E' il modo piu' probabile di fallire su questo percorso: una colonna con un
+ * altro nome, una riga senza playerId, dieci titolari invece di undici.
+ * L'importatore lo sa dire con precisione, e quei messaggi finivano inghiottiti
+ * da una pagina d'errore generica — lasciando come unica strategia rinunciare.
+ */
+const righeVoti = modelli.voti.split('\n');
+const guasto = [righeVoti[0], righeVoti[1].replace(/^[^,]*/, ''), ...righeVoti.slice(2)].join('\n');
+
+await mario.page.goto(`${base}/lega/nuova`, { waitUntil: 'domcontentloaded' });
+const formGuasto = mario.page.locator('form').filter({ hasText: 'Importa e genera' });
+await formGuasto.locator('input[name="leagueName"]').fill('Lega Rotta');
+for (const [nome, testo] of Object.entries({ ...modelli, voti: guasto })) {
+  await formGuasto.locator(`input[name="${nome}"]`).setInputFiles({
+    name: `${nome}.csv`, mimeType: 'text/csv', buffer: Buffer.from(testo, 'utf8'),
+  });
+}
+await formGuasto.locator('button:has-text("Importa e genera")').click();
+await mario.page.locator('.notice.error').waitFor({ state: 'visible', timeout: 60000 });
+const messaggio = await mario.page.locator('.notice.error').innerText();
+ok('un CSV sbagliato spiega cosa non andava invece di esplodere',
+   /playerId/i.test(messaggio), messaggio.slice(0, 90));
+ok('e si resta sul modulo, non su una pagina d’errore',
+   mario.page.url().includes('/lega/nuova'), mario.page.url());
+
 await mario.page.goto(legaUrl, { waitUntil: 'domcontentloaded' });
 await mario.page.locator('.share-box code').waitFor({ state: 'visible', timeout: 20000 });
 
