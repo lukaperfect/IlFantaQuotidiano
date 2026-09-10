@@ -1,8 +1,10 @@
 name: CI
 
 on:
+  # Solo main sui push: i branch di lavoro sono gia' coperti dal trigger
+  # pull_request, e tenere entrambi produce due run identiche per commit.
   push:
-    branches: ['**']
+    branches: [main]
   pull_request:
 
 concurrency:
