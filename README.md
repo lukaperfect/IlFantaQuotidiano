@@ -35,7 +35,7 @@ Da qui tre inversioni che governano tutto il codice:
 pnpm install
 pnpm test                                   # 261 test (246 senza database)
 pnpm demo -- --out out --giornate 6         # una stagione simulata end-to-end
-pnpm demo -- --out out --giornate 4 --assets   # aggiunge PDF e PNG reali (serve Chromium)
+pnpm demo -- --out out --giornate 4 --assets   # aggiunge PDF A3 e un campione di card in PNG
 
 # L'app web
 pnpm --filter @fantacomics/web build

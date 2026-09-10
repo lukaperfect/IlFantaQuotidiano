@@ -174,6 +174,53 @@ jobs:
         # mappatura, relay, giornale pubblicato.
         run: pnpm exec tsx apps/extension/test/verifica.ts
 
+      - name: PDF e PNG generati davvero con Chromium
+        # Il README promette un broadsheet A3 e le card in PNG. Erano l'unica
+        # uscita del prodotto che la CI non guardava: verificata a mano una
+        # volta e poi lasciata a se stessa, cioe' destinata a rompersi senza
+        # che nessuno se ne accorga. Qui Chromium c'e' gia': costa poco.
+        run: |
+          pnpm demo -- --out ci-assets --giornate 2 --assets
+          node -e "
+            const fs = require('fs');
+            const pdf = fs.readFileSync('ci-assets/giornale.pdf');
+            if (pdf.subarray(0, 5).toString() !== '%PDF-') {
+              console.error('giornale.pdf non e\' un PDF'); process.exit(1);
+            }
+            if (pdf.length < 20000) {
+              console.error('giornale.pdf troppo piccolo: ' + pdf.length + ' byte'); process.exit(1);
+            }
+            // Il formato e' una promessa del prodotto: broadsheet A3, non A4
+            // ingrandito. 297x420mm sono 841.89x1190.55 punti; Chromium
+            // arrotonda, quindi si verifica con tolleranza.
+            const box = /\/MediaBox\s*\[([^\]]+)\]/.exec(pdf.toString('latin1'));
+            if (!box) { console.error('MediaBox non trovato nel PDF'); process.exit(1); }
+            const [, , w, h] = box[1].trim().split(/\s+/).map(Number);
+            if (Math.abs(w - 841.89) > 3 || Math.abs(h - 1190.55) > 3) {
+              console.error('il PDF non e\' A3: ' + w + 'x' + h + ' punti'); process.exit(1);
+            }
+            const pagine = Number((/\/Count\s+(\d+)/.exec(pdf.toString('latin1')) ?? [])[1] ?? 0);
+            if (pagine < 1) { console.error('PDF senza pagine'); process.exit(1); }
+            // La demo rende un campione di card, non tutte: e' documentato nella
+            // CLI e il log lo dice. Qui si verifica il campione, non un numero
+            // che sembrava giusto.
+            const card = fs.readdirSync('ci-assets').filter((f) => /^card-.*\.png$/.test(f));
+            if (card.length < 3) { console.error('card PNG mancanti: ' + card.length); process.exit(1); }
+            if (!fs.existsSync('ci-assets/anteprima.png')) {
+              console.error('anteprima.png mancante'); process.exit(1);
+            }
+            for (const f of card) {
+              const b = fs.readFileSync('ci-assets/' + f);
+              if (b.subarray(1, 4).toString() !== 'PNG') {
+                console.error(f + ' non e\' un PNG'); process.exit(1);
+              }
+            }
+            console.log(
+              'PDF ' + pdf.length + ' byte, ' + pagine + ' pagine A3, ' +
+              card.length + ' card PNG: veri.'
+            );
+          "
+
       - name: Log in caso di guasto
         if: failure()
         run: |

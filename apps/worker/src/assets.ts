@@ -23,8 +23,18 @@ export class AssetRenderer {
 
   private async launch(): Promise<Browser> {
     if (this.browser) return this.browser;
+    /**
+     * QUALE Chromium, detto esplicitamente.
+     *
+     * Senza dirlo, in headless Playwright si risolve nella *headless shell*:
+     * un build ridotto che qui basterebbe, ma che ha gia' fatto fallire in
+     * modo oscuro la verifica dell'estensione, dove invece non basta. Lasciare
+     * la scelta implicita significa dipendere da come Playwright decide oggi.
+     */
     const executablePath = this.opts.executablePath ?? process.env.CHROMIUM_PATH;
-    this.browser = await chromium.launch(executablePath ? { executablePath } : {});
+    this.browser = await chromium.launch(
+      executablePath ? { executablePath } : { channel: 'chromium' },
+    );
     return this.browser;
   }
 

@@ -40,6 +40,9 @@ function parseArgs(argv: readonly string[]): Args {
   };
 }
 
+/** Quante card rendere in PNG nella demo. In produzione sono tutte. */
+const CARD_NELLA_DEMO = 3;
+
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const store = new FileLeagueStore(`${args.outDir}/stato`);
@@ -119,11 +122,27 @@ async function main(): Promise<void> {
     const renderer = new AssetRenderer({ executablePath: process.env.CHROMIUM_PATH });
     try {
       await renderer.pdf(ultimo.html.print, `${args.outDir}/giornale.pdf`);
-      for (const card of ultimo.cards.slice(0, 3)) {
+
+      /**
+       * Un campione di card, non tutte.
+       *
+       * Ogni PNG e' un giro completo di Chromium: su una lega da dodici
+       * squadre la demo ci metterebbe piu' a fare le immagini che a fare il
+       * giornale, e a chi guarda la demo servono per vedere che escono, non
+       * per averle tutte. In produzione le fa il worker, una per presidente.
+       *
+       * Il limite era gia' qui ma non lo diceva nessuno, e il log si vantava
+       * di aver generato "PDF e PNG" come se fossero tutte: un conto che non
+       * torna e nessuna riga che spieghi perche'.
+       */
+      const campione = ultimo.cards.slice(0, CARD_NELLA_DEMO);
+      for (const card of campione) {
         await renderer.png(card.svg, `${args.outDir}/card-${card.teamId}.png`, { width: 1080, height: 1350 });
       }
       await renderer.screenshot(ultimo.html.web, `${args.outDir}/anteprima.png`);
-      console.log('PDF e PNG generati.');
+      console.log(
+        `PDF, anteprima e ${campione.length} card su ${ultimo.cards.length} generati con Chromium.`,
+      );
     } finally {
       await renderer.close();
     }
