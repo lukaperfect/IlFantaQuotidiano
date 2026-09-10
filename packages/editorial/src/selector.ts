@@ -290,9 +290,58 @@ export function planEdition(input: SelectionInput): EditorialPlan {
   const usedFormats = new Set<string>();
   const usedPersonas = new Set<string>();
 
+  /**
+   * Una squadra puo' ancorare UN solo pezzo per edizione.
+   * Senza questo vincolo lo stesso presidente si prende due titoli nella
+   * stessa pagina e il giornale sembra scritto male, anche quando i due
+   * fatti sono diversi.
+   */
+  const anchored = new Set<string>();
+
+  const usedFactIds = new Set<string>();
+  const cap = SPICE_CAP[input.spice ?? 2];
+  /** Conteggio dei fatti negativi gia' finiti in pagina, per squadra. */
+  const negInPage = new Map<string, number>();
+  const noteNegatives = (fact: NarrativeFact) => {
+    if (!NEGATIVE.has(fact.polarity)) return;
+    for (const t of teamsOf(fact)) negInPage.set(t, (negInPage.get(t) ?? 0) + 1);
+  };
+  const withinCap = (fact: NarrativeFact) =>
+    !NEGATIVE.has(fact.polarity) ||
+    teamsOf(fact).every((t) => (negInPage.get(t) ?? 0) < cap);
+
+  const isFresh = (f: NarrativeFact) => {
+    const p = protagonistOf(f);
+    return p === undefined || !anchored.has(p);
+  };
+
   for (const slot of slots) {
-    const anchor = pool.shift();
+    let anchor: NarrativeFact | undefined;
+
+    const idx = pool.findIndex(isFresh);
+    if (idx >= 0) {
+      anchor = pool.splice(idx, 1)[0];
+    } else {
+      /**
+       * I fatti di una squadra possono essere gia' stati consumati come
+       * materiale di corredo di un altro pezzo. Prima di rassegnarsi a far
+       * aprire due pezzi allo stesso presidente si ripesca dall'elenco
+       * completo: meglio un fatto meno drammatico ma di un'altra squadra.
+       */
+      // Il ripiego NON puo' scavalcare il tetto agli sfotto': ripescare a mano
+      // un fatto bypassando il vincolo lo renderebbe inefficace proprio nei
+      // casi in cui serve di piu'.
+      anchor = input.facts.find((f) => !usedFactIds.has(f.id) && isFresh(f) && withinCap(f));
+      if (!anchor) anchor = pool.shift();
+    }
     if (!anchor) break;
+
+    usedFactIds.add(anchor.id);
+    noteNegatives(anchor);
+    const poolIdx = pool.indexOf(anchor);
+    if (poolIdx >= 0) pool.splice(poolIdx, 1);
+    const protagonist = protagonistOf(anchor);
+    if (protagonist) anchored.add(protagonist);
 
     const format = pickFormat(slot, anchor, input, usedFormats, rnd, warnings);
     usedFormats.add(format.id);
@@ -317,13 +366,18 @@ export function planEdition(input: SelectionInput): EditorialPlan {
         for (const t of candTeams) seenTeams.add(t);
       }
     }
-    for (const e of extras) pool.splice(pool.indexOf(e), 1);
+    for (const e of extras) {
+      const i = pool.indexOf(e);
+      if (i >= 0) pool.splice(i, 1);
+      usedFactIds.add(e.id);
+      noteNegatives(e);
+    }
 
     const facts = [anchor, ...extras];
     if (facts.length < format.minFacts) {
       while (facts.length < format.minFacts && pool.length > 0) {
         const filler = pool.shift();
-        if (filler) facts.push(filler);
+        if (filler) { facts.push(filler); usedFactIds.add(filler.id); noteNegatives(filler); }
       }
     }
 

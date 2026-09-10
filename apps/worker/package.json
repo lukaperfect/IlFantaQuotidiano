@@ -11,6 +11,7 @@
     "@fantacomics/editorial": "workspace:*",
     "@fantacomics/llm": "workspace:*",
     "@fantacomics/render": "workspace:*",
-    "@fantacomics/ingest": "workspace:*"
+    "@fantacomics/ingest": "workspace:*",
+    "playwright": "^1.49.0"
   }
 }

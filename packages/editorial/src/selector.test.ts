@@ -240,3 +240,26 @@ describe('card personali', () => {
     }
   });
 });
+
+describe('impaginazione', () => {
+  it('non lascia che la stessa squadra apra due pezzi', () => {
+    const plan = planEdition(input());
+    const protagonisti = plan.articles
+      .map((a) => a.facts[0]?.subjects.find((s) => s.kind === 'team')?.id)
+      .filter((id): id is string => id !== undefined);
+    expect(new Set(protagonisti).size).toBe(protagonisti.length);
+  });
+
+  it('riempie comunque lo slot se restano solo squadre già in apertura', () => {
+    // Un solo soggetto disponibile: la ripetizione è preferibile allo slot vuoto.
+    const mk = (id: string, drama: number): NarrativeFact => ({
+      id, type: 'REGRET_TOTALE', matchday: 12, drama, polarity: 'tragedia', rarityPercentile: null,
+      subjects: [{ kind: 'team', id: 't1', display: 'T1' }],
+      numbers: { punti: '60' }, plain: `Fatto ${id}`, evidence: [],
+    });
+    const plan = planEdition(input({
+      facts: [mk('a', 80), mk('b', 70), mk('c', 60)], teamIds: ['t1'], targetArticles: 3,
+    }));
+    expect(plan.articles.length).toBeGreaterThan(0);
+  });
+});

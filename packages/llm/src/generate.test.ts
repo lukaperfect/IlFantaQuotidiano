@@ -230,3 +230,32 @@ describe('costi', () => {
     expect(proj.totalSeasonUSD).toBeCloseTo(t.totalUSD * 38 * 500, 4);
   });
 });
+
+describe('modalità degradata — qualità del testo', () => {
+  it('non ripete la stessa frase in occhiello e corpo', async () => {
+    const res = await generateEdition(options());
+    for (const article of res.edition.articles) {
+      const standfirst = article.blocks.find((b) => b.kind === 'standfirst');
+      if (!standfirst || standfirst.kind !== 'standfirst') continue;
+      const bodyText = article.blocks
+        .filter((b) => b.kind === 'body' || b.kind === 'list')
+        .map((b) => (b.kind === 'body' ? b.paragraphs.join(' ') : b.items.join(' ')))
+        .join(' ');
+      const frase = standfirst.text.replace(/…$/, '').slice(0, 60);
+      expect(bodyText, `pezzo ${article.format}`).not.toContain(frase);
+    }
+  });
+
+  it('non usa elenchi puntati nell’apertura di prima pagina', async () => {
+    const res = await generateEdition(options());
+    const apertura = res.edition.articles.find((a) => a.slot === 'apertura');
+    expect(apertura?.blocks.some((b) => b.kind === 'list')).toBe(false);
+  });
+
+  it('rende leggibili le etichette delle statistiche nelle card', async () => {
+    const res = await generateEdition(options());
+    for (const card of res.edition.personalCards) {
+      expect(card.stat.label).not.toMatch(/[a-z][A-Z]/); // niente camelCase grezzo
+    }
+  });
+});

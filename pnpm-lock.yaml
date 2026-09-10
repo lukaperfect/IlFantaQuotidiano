@@ -11,6 +11,9 @@ importers:
       '@types/node':
         specifier: ^22.10.2
         version: 22.20.2
+      playwright:
+        specifier: ^1.63.0
+        version: 1.63.0
       tsx:
         specifier: ^4.19.2
         version: 4.23.13
@@ -44,6 +47,9 @@ importers:
       '@fantacomics/scoring':
         specifier: workspace:*
         version: link:../../packages/scoring
+      playwright:
+        specifier: ^1.49.0
+        version: 1.63.0
 
   packages/core:
     dependencies:
@@ -119,6 +125,21 @@ importers:
       '@fantacomics/core':
         specifier: workspace:*
         version: link:../core
+      '@fantacomics/editorial':
+        specifier: workspace:*
+        version: link:../editorial
+      '@fantacomics/facts':
+        specifier: workspace:*
+        version: link:../facts
+      '@fantacomics/ingest':
+        specifier: workspace:*
+        version: link:../ingest
+      '@fantacomics/llm':
+        specifier: workspace:*
+        version: link:../llm
+      '@fantacomics/scoring':
+        specifier: workspace:*
+        version: link:../scoring
 
   packages/scoring:
     dependencies:
@@ -706,6 +727,16 @@ packages:
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
 
+  playwright-core@1.63.0:
+    resolution: {integrity: sha512-rYCsBF/M5HjUch52bbtVONEFjv6Xu8sm8h72dNlR5bzIE1fvC/bxgspzkjSfU+MweEMmPM8KJebG6nnyxo5mCg==}
+    engines: {node: '>=20'}
+    hasBin: true
+
+  playwright@1.63.0:
+    resolution: {integrity: sha512-+7ziBLidS4NaNCdt57SUDT+wYmmd5fmiQejUic/kb+YsYSCPyOOE9sebzMjNmQrsnNpDJqd4WHvV/8lfKfUDUg==}
+    engines: {node: '>=20'}
+    hasBin: true
+
   postcss@8.5.28:
     resolution: {integrity: sha512-RRuzqDtt5Y9h3quz5hWhK+TPnsmVs6WwSU6LkJMeY4HstUEDuYTG8UJSdawMRzmzAtV+KEoG8N3Qg2qLy5vM/A==}
     engines: {node: ^10 || ^12 || >=14}
@@ -1228,6 +1259,12 @@ snapshots:
   pathval@2.0.1: {}
 
   picocolors@1.1.1: {}
+
+  playwright-core@1.63.0: {}
+
+  playwright@1.63.0:
+    dependencies:
+      playwright-core: 1.63.0
 
   postcss@8.5.28:
     dependencies:

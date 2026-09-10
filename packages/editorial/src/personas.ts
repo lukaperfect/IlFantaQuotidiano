@@ -23,7 +23,7 @@ export const PERSONAS: Persona[] = [
   },
   {
     id: 'analista',
-    name: 'L Analista',
+    name: "L'Analista",
     voice: 'Parla per percentili, medie e scarti. Usa i numeri con precisione clinica e una freddezza che diventa comica.',
   },
   {
@@ -33,7 +33,7 @@ export const PERSONAS: Persona[] = [
   },
   {
     id: 'inviato',
-    name: 'L Inviato di Guerra',
+    name: "L'Inviato di Guerra",
     voice: 'Tono epico e drammatico applicato a fatti minuscoli. Metafore belliche, presente storico, enfasi sproporzionata.',
   },
   {

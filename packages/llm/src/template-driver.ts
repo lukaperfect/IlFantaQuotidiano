@@ -1,5 +1,4 @@
 import type { Block, NarrativeFact } from '@fantacomics/core';
-import { seededRandom } from '@fantacomics/core';
 import type { ArticleDraft, ArticleRequest, CardDraft, CardRequest, CardsDraft, LlmDriver } from './driver.js';
 
 /**
@@ -14,28 +13,40 @@ export class TemplateDriver implements LlmDriver {
   readonly name = 'template';
 
   async article(req: ArticleRequest): Promise<ArticleDraft> {
-    const rnd = seededRandom(`${req.formatId}:${req.matchday}:${req.facts[0]?.id ?? ''}`);
     const facts = [...req.facts];
     const anchor = facts[0];
+    const rest = facts.slice(1);
     const blocks: Block[] = [];
 
     blocks.push({ kind: 'headline', text: headlineFor(anchor, req.formatLabel) });
 
-    const standfirst = `${req.formatLabel} · ${req.personaName}. ${anchor?.plain ?? ''}`;
-    blocks.push({ kind: 'standfirst', text: clamp(standfirst, 20, 180) });
+    /**
+     * Occhiello e corpo non devono MAI ripetere la stessa frase: e' il difetto
+     * che rende evidente a colpo d'occhio che il pezzo e' stato composto da una
+     * macchina. L'occhiello prende il fatto d'apertura, il corpo prende gli
+     * altri; con un fatto solo l'occhiello sparisce invece di duplicare.
+     * Per lo stesso motivo qui non si emettono citazioni in evidenza: in
+     * modalita' degradata potrebbero solo ripetere una frase gia' stampata.
+     */
+    if (rest.length > 0 && anchor) {
+      blocks.push({ kind: 'standfirst', text: clamp(anchor.plain, 20, 180) });
+    }
 
+    const material = rest.length > 0 ? rest : anchor ? [anchor] : [];
     const allowed = new Set(req.allowedBlockKinds ?? []);
-    const wantsList = allowed.size > 0 ? allowed.has('list') : facts.length >= 3;
+    // La lista si usa solo dove il formato la prevede: un'apertura di prima
+    // pagina con gli elenchi puntati non e' un'apertura di prima pagina.
+    const wantsList = allowed.has('list') && req.slot !== 'apertura';
 
-    if (wantsList) {
+    if (wantsList && material.length >= 2) {
       blocks.push({
         kind: 'list',
         title: clamp(req.formatLabel, 0, 60),
-        items: facts.slice(0, 8).map((f) => clamp(f.plain, 3, 220)),
+        items: material.slice(0, 8).map((f) => clamp(f.plain, 3, 220)),
       });
     } else {
       const paragraphs: string[] = [];
-      for (const f of facts) {
+      for (const f of material) {
         const last = paragraphs[paragraphs.length - 1];
         // I paragrafi hanno un minimo di lunghezza nell'IR: si accorpano
         // invece di riempirli di parole vuote.
@@ -43,18 +54,10 @@ export class TemplateDriver implements LlmDriver {
         else paragraphs.push(f.plain);
       }
       const merged = paragraphs.map((p) => clamp(p, 40, 700)).filter((p) => p.length >= 40);
-      blocks.push({ kind: 'body', paragraphs: merged.length > 0 ? merged : [clamp(anchor?.plain ?? 'Giornata senza storia.', 40, 700)] });
-    }
-
-    if (facts.length > 1 && rnd() > 0.4) {
-      const quote = facts[1];
-      if (quote) {
-        blocks.push({
-          kind: 'pull_quote',
-          text: clamp(quote.plain, 10, 160),
-          attribution: clamp(quote.subjects[0]?.display ?? '', 0, 60),
-        });
-      }
+      blocks.push({
+        kind: 'body',
+        paragraphs: merged.length > 0 ? merged : [clamp(anchor?.plain ?? 'Giornata senza storia.', 40, 700)],
+      });
     }
 
     return { blocks, usage: null, producedBy: this.name };
@@ -65,9 +68,11 @@ export class TemplateDriver implements LlmDriver {
       const [label, value] = primaryNumber(c.fact);
       return {
         teamId: c.teamId,
-        headline: clamp(`${c.teamName}: ${toneWord(c.tone)}`, 5, 70),
+        // Il nome squadra e' gia' nel soprattitolo della card: ripeterlo
+        // nel titolo spreca la riga piu' preziosa.
+        headline: clamp(toneWord(c.tone), 5, 70),
         body: clamp(c.fact.plain, 20, 320),
-        statLabel: clamp(label, 0, 40),
+        statLabel: clamp(humanizeKey(label), 0, 40),
         statValue: clamp(value, 0, 16),
       };
     });
@@ -75,10 +80,16 @@ export class TemplateDriver implements LlmDriver {
   }
 }
 
+/** "rimpiantoPanchina" -> "Rimpianto panchina": le chiavi non sono etichette. */
+function humanizeKey(key: string): string {
+  const spaced = key.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
 function toneWord(tone: string): string {
-  if (tone === 'gloria') return 'la giornata giusta';
-  if (tone === 'grigiore') return 'ordinaria amministrazione';
-  return 'si poteva evitare';
+  if (tone === 'gloria') return 'La giornata giusta';
+  if (tone === 'grigiore') return 'Ordinaria amministrazione';
+  return 'Si poteva evitare';
 }
 
 function headlineFor(fact: NarrativeFact | undefined, fallback: string): string {
