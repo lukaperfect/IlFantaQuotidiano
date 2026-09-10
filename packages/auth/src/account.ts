@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { hashToken, randomToken } from './token.js';
+import { hashToken, randomToken, safeEqual } from './token.js';
 
 export const AccountSchema = z.object({
   accountId: z.string().min(1),
@@ -12,6 +12,13 @@ export type Account = z.infer<typeof AccountSchema>;
 export type MagicLink = {
   /** SOLO l'hash. Il token in chiaro esiste una volta sola, al momento dell'invio. */
   tokenHash: string;
+  /**
+   * Hash del nonce messo nel cookie di chi ha CHIESTO il link. Lega il token
+   * al browser richiedente: senza, chi riceve il link inoltrato entra
+   * nell'account di chi gliel'ha mandato. `null` sui link emessi prima che
+   * il legame esistesse, e per loro si passa dalla conferma esplicita.
+   */
+  nonceHash: string | null;
   accountId: string;
   expiresAt: number;
   usedAt: number | null;
@@ -23,7 +30,12 @@ export interface AuthStore {
   createAccount(account: Account): Promise<void>;
   saveMagicLink(link: MagicLink): Promise<void>;
   getMagicLink(tokenHash: string): Promise<MagicLink | null>;
-  markMagicLinkUsed(tokenHash: string, usedAt: number): Promise<void>;
+  /**
+   * Marca il link come speso e dice se e' stata QUESTA chiamata a marcarlo.
+   * Il booleano non e' cosmetico: e' l'unico modo perche' il monouso lo
+   * decida la scrittura invece di una lettura fatta un istante prima.
+   */
+  markMagicLinkUsed(tokenHash: string, usedAt: number): Promise<boolean>;
   /** Ultimo invio per quell'email: serve a non trasformare l'endpoint in un mortaio. */
   lastIssuedAt(email: string): Promise<number | null>;
   recordIssued(email: string, at: number): Promise<void>;
@@ -78,7 +90,14 @@ export const MAGIC_LINK_TTL_MS = 15 * 60 * 1000;
 export const ISSUE_THROTTLE_MS = 60 * 1000;
 
 export type IssueResult =
-  | { ok: true; token: string; accountId: string; nuovoAccount: boolean }
+  | {
+      ok: true;
+      token: string;
+      /** Da mettere in un cookie sul browser che ha chiesto il link. */
+      nonce: string;
+      accountId: string;
+      nuovoAccount: boolean;
+    }
   | { ok: false; reason: 'email-non-valida' | 'troppo-frequente' };
 
 /**
@@ -116,15 +135,21 @@ export async function issueMagicLink(
   }
 
   const token = randomToken(32);
+  // Il nonce lega il link al BROWSER che l'ha chiesto. Senza legame, un link
+  // inoltrato a un estraneo apre nel suo browser una sessione sull'account di
+  // chi gliel'ha mandato: da li' in poi tutto cio' che quell'estraneo carica
+  // finisce in casa d'altri, ed e' lui a subirlo senza accorgersene.
+  const nonce = randomToken(24);
   await store.saveMagicLink({
     tokenHash: hashToken(token),
+    nonceHash: hashToken(nonce),
     accountId: account.accountId,
     expiresAt: now + MAGIC_LINK_TTL_MS,
     usedAt: null,
   });
   await store.recordIssued(email, now);
 
-  return { ok: true, token, accountId: account.accountId, nuovoAccount };
+  return { ok: true, token, nonce, accountId: account.accountId, nuovoAccount };
 }
 
 export type ConsumeResult =
@@ -143,6 +168,43 @@ export async function consumeMagicLink(
   if (link.usedAt !== null) return { ok: false, reason: 'gia-usato' };
   if (link.expiresAt <= now) return { ok: false, reason: 'scaduto' };
 
-  await store.markMagicLinkUsed(link.tokenHash, now);
+  // La corsa la decide la scrittura, non la lettura qui sopra: se un'altra
+  // richiesta ha speso il link nel frattempo, ha vinto lei e questa deve
+  // fallire esattamente come se l'avesse trovato gia' usato.
+  if (!(await store.markMagicLinkUsed(link.tokenHash, now))) {
+    return { ok: false, reason: 'gia-usato' };
+  }
   return { ok: true, accountId: link.accountId };
+}
+
+/** Il cookie di richiesta corrisponde al link? Confronto a tempo costante. */
+export function nonceMatches(link: MagicLink, nonce: string | undefined): boolean {
+  if (link.nonceHash === null || nonce === undefined || nonce === '') return false;
+  return safeEqual(link.nonceHash, hashToken(nonce));
+}
+
+export type PeekResult =
+  | { ok: true; accountId: string; stessoBrowser: boolean }
+  | { ok: false; reason: 'sconosciuto' | 'gia-usato' | 'scaduto' };
+
+/**
+ * Guarda un link SENZA consumarlo, e dice se chi lo apre e' lo stesso browser
+ * che l'ha chiesto.
+ *
+ * Serve alla pagina di conferma: un link che si spende per poter essere
+ * mostrato e' gia' speso prima che l'utente confermi, quindi la lettura deve
+ * poter avvenire senza consumo.
+ */
+export async function peekMagicLink(
+  store: AuthStore,
+  token: string,
+  nonce: string | undefined,
+  opts: { now?: number } = {},
+): Promise<PeekResult> {
+  const now = opts.now ?? Date.now();
+  const link = await store.getMagicLink(hashToken(token));
+  if (!link) return { ok: false, reason: 'sconosciuto' };
+  if (link.usedAt !== null) return { ok: false, reason: 'gia-usato' };
+  if (link.expiresAt <= now) return { ok: false, reason: 'scaduto' };
+  return { ok: true, accountId: link.accountId, stessoBrowser: nonceMatches(link, nonce) };
 }

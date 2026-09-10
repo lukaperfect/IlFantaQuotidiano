@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { signSession, verifySession, safeEqual, randomToken, hashToken } from './token.js';
 import { signingSecret, usingDevSecret } from './secret.js';
 import {
-  issueMagicLink, consumeMagicLink, normalizeEmail, ConsoleMailer,
+  issueMagicLink, consumeMagicLink, peekMagicLink, normalizeEmail, ConsoleMailer,
   MAGIC_LINK_TTL_MS, ISSUE_THROTTLE_MS,
   type Account, type AuthStore, type MagicLink,
 } from './account.js';
@@ -21,9 +21,11 @@ class MemoryAuthStore implements AuthStore {
   async createAccount(a: Account) { this.accounts.set(a.accountId, a); }
   async saveMagicLink(l: MagicLink) { this.links.set(l.tokenHash, l); }
   async getMagicLink(h: string) { return this.links.get(h) ?? null; }
-  async markMagicLinkUsed(h: string, usedAt: number) {
+  async markMagicLinkUsed(h: string, usedAt: number): Promise<boolean> {
     const l = this.links.get(h);
-    if (l) this.links.set(h, { ...l, usedAt });
+    if (!l || l.usedAt !== null) return false;
+    this.links.set(h, { ...l, usedAt });
+    return true;
   }
   async lastIssuedAt(email: string) { return this.issued.get(email) ?? null; }
   async recordIssued(email: string, at: number) { this.issued.set(email, at); }
@@ -125,6 +127,67 @@ describe('magic link', () => {
     const secondo = await consumeMagicLink(store, issued.token, { now: now + 2000 });
     expect(secondo.ok).toBe(false);
     if (!secondo.ok) expect(secondo.reason).toBe('gia-usato');
+  });
+
+  it('se perde la corsa sulla scrittura, non apre la sessione', async () => {
+    const store = new MemoryAuthStore();
+    const issued = await issueMagicLink(store, 'gara@b.it', { now });
+    if (!issued.ok) throw new Error('atteso ok');
+
+    // Simula l'altra richiesta che ha marcato il link fra il `getMagicLink`
+    // e il `markMagicLinkUsed` di questa: la lettura l'ha visto libero, la
+    // scrittura dice di no. E' la scrittura ad avere ragione — se il
+    // chiamante ignorasse quel booleano, entrambe aprirebbero una sessione
+    // dallo stesso token monouso.
+    store.markMagicLinkUsed = async () => false;
+
+    const r = await consumeMagicLink(store, issued.token, { now: now + 1000 });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe('gia-usato');
+  });
+
+  it('lega il token al browser che l’ha chiesto', async () => {
+    const store = new MemoryAuthStore();
+    const issued = await issueMagicLink(store, 'a@b.it', { now });
+    if (!issued.ok) throw new Error('atteso ok');
+
+    expect(await peekMagicLink(store, issued.token, issued.nonce, { now: now + 1000 }))
+      .toEqual({ ok: true, accountId: issued.accountId, stessoBrowser: true });
+
+    // Il link inoltrato a un altro browser resta valido ma non e' piu' legato:
+    // e' il caso in cui serve la conferma esplicita, non il rifiuto.
+    expect(await peekMagicLink(store, issued.token, 'nonce-di-un-altro', { now: now + 1000 }))
+      .toMatchObject({ ok: true, stessoBrowser: false });
+    expect(await peekMagicLink(store, issued.token, undefined, { now: now + 1000 }))
+      .toMatchObject({ ok: true, stessoBrowser: false });
+  });
+
+  it('conserva SOLO l’hash del nonce, e non lo mette nel link', async () => {
+    const store = new MemoryAuthStore();
+    const issued = await issueMagicLink(store, 'a@b.it', { now });
+    if (!issued.ok) throw new Error('atteso ok');
+
+    // Il nonce viaggia nel cookie, mai nell'URL: se finisse nel link
+    // arriverebbe a chiunque lo riceva, e il legame col browser sarebbe
+    // esattamente inutile.
+    expect(issued.token).not.toContain(issued.nonce);
+    const salvati = JSON.stringify([...store.links.values()]);
+    expect(salvati).not.toContain(issued.nonce);
+    expect(salvati).toContain(hashToken(issued.nonce));
+  });
+
+  it('un link emesso senza legame passa dalla conferma, non entra', async () => {
+    const store = new MemoryAuthStore();
+    const issued = await issueMagicLink(store, 'a@b.it', { now });
+    if (!issued.ok) throw new Error('atteso ok');
+
+    // I link gia' in circolazione quando il legame e' stato introdotto non
+    // hanno nonce. Devono continuare a funzionare, ma dalla via prudente.
+    const link = store.links.get(hashToken(issued.token))!;
+    store.links.set(link.tokenHash, { ...link, nonceHash: null });
+
+    expect(await peekMagicLink(store, issued.token, issued.nonce, { now: now + 1000 }))
+      .toMatchObject({ ok: true, stessoBrowser: false });
   });
 
   it('conserva SOLO l’hash del token', async () => {

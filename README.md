@@ -33,7 +33,7 @@ Da qui tre inversioni che governano tutto il codice:
 
 ```bash
 pnpm install
-pnpm test                                   # 220 test (207 senza database)
+pnpm test                                   # 230 test (215 senza database)
 pnpm demo -- --out out --giornate 6         # una stagione simulata end-to-end
 pnpm demo -- --out out --giornate 4 --assets   # aggiunge PDF e PNG reali (serve Chromium)
 
@@ -148,6 +148,21 @@ accesso non dipende dal fatto che ogni pagina si ricordi di farlo: non esiste
 proprio il modo di leggere una lega altrui. Una lega di un altro e una lega
 inesistente rispondono identicamente, perché distinguerle direbbe a un estraneo
 quali id esistono.
+
+**Un link di accesso vale per il browser che l'ha chiesto.** Il magic link
+apre una sessione, quindi inoltrarlo a qualcuno significa autenticare il *suo*
+browser sul *proprio* account — e da lì in poi tutto ciò che quella persona
+carica finisce in un archivio che non è il suo. È una trappola particolarmente
+efficace perché non ha nessuno dei segnali che rendono riconoscibile una
+truffa: dominio, certificato e interfaccia sono quelli veri. Al momento della
+richiesta si mette un nonce in un cookie e se ne conserva l'hash accanto al
+link. Chi torna con quel cookie entra a un click, che è il caso normale. Chi
+non ce l'ha non viene respinto — aprire dal telefono un link chiesto dal
+desktop è legittimo e comune — ma passa da una conferma che dice a schermo *in
+quale account* sta per entrare: chi l'ha chiesto riconosce il proprio
+indirizzo, chi se l'è visto girare ne legge uno che non conosce. La conferma è
+una server action, cioè una POST con verifica dell'origine, perché una GET che
+apre una sessione si attiva seguendo un collegamento qualunque.
 
 **Il giornale è pubblico, il link è revocabile.** La lettura senza account non è
 una svista: è il ciclo di condivisione che regge il prodotto. Ma l'indirizzo è

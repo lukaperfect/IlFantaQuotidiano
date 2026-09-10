@@ -8,6 +8,13 @@ import { authStore } from './store';
 const COOKIE = 'fc_sess';
 const DURATA_MS = 30 * 24 * 60 * 60 * 1000;
 
+/**
+ * Cookie del nonce di accesso: lega un magic link al browser che l'ha chiesto.
+ * Percorso ristretto a /accedi perche' oltre quel flusso non serve a niente,
+ * e un cookie che non viaggia e' un cookie che non si perde.
+ */
+export const NONCE_COOKIE = 'fc_ml';
+
 export async function startSession(accountId: string): Promise<void> {
   const value = signSession(
     { accountId, expiresAt: Date.now() + DURATA_MS },

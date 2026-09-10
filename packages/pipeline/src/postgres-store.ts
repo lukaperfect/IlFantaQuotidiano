@@ -207,9 +207,9 @@ export class PostgresAuthStore implements AuthStore {
 
   async saveMagicLink(link: MagicLink): Promise<void> {
     await this.pool.query(
-      `insert into magic_links (token_hash, account_id, expires_at, used_at)
-       values ($1,$2,$3,$4) on conflict (token_hash) do nothing`,
-      [link.tokenHash, link.accountId, link.expiresAt, link.usedAt],
+      `insert into magic_links (token_hash, nonce_hash, account_id, expires_at, used_at)
+       values ($1,$2,$3,$4,$5) on conflict (token_hash) do nothing`,
+      [link.tokenHash, link.nonceHash, link.accountId, link.expiresAt, link.usedAt],
     );
     // Potatura opportunistica: si tiene un'ora di margine oltre la scadenza,
     // abbastanza per rispondere "gia-usato" invece di "sconosciuto".
@@ -224,20 +224,24 @@ export class PostgresAuthStore implements AuthStore {
     if (!row) return null;
     return {
       tokenHash: row.token_hash as string,
+      nonceHash: (row.nonce_hash as string | null) ?? null,
       accountId: row.account_id as string,
       expiresAt: Number(row.expires_at),
       usedAt: row.used_at === null ? null : Number(row.used_at),
     };
   }
 
-  async markMagicLinkUsed(tokenHash: string, usedAt: number): Promise<void> {
-    // `used_at is null` nella WHERE: se due richieste corrono, solo la prima
-    // consuma il link. Marcarlo senza questa condizione permetterebbe a un
-    // doppio click di aprire due sessioni dallo stesso token.
-    await this.pool.query(
+  async markMagicLinkUsed(tokenHash: string, usedAt: number): Promise<boolean> {
+    // `used_at is null` nella WHERE: se due richieste corrono, solo una riga
+    // viene aggiornata. Ma la condizione da sola non basta — se il chiamante
+    // non guarda QUANTE righe ha toccato, entrambe le richieste credono di
+    // aver vinto e aprono una sessione. E' `rowCount` a rendere vera la
+    // garanzia; senza, il monouso resta deciso da una lettura precedente.
+    const { rowCount } = await this.pool.query(
       'update magic_links set used_at = $2 where token_hash = $1 and used_at is null',
       [tokenHash, usedAt],
     );
+    return (rowCount ?? 0) === 1;
   }
 
   async lastIssuedAt(email: string): Promise<number | null> {

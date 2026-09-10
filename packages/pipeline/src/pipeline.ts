@@ -1,5 +1,7 @@
-import type {
-  Edition, FactPack, LeagueRuleset, LeagueWeekSnapshot, SerieAMatchday,
+import {
+  safeName,
+  type Edition, type FactPack, type LeagueRuleset, type LeagueWeekSnapshot,
+  type SerieAMatchday,
 } from '@fantacomics/core';
 import { computeLeagueMatchday, type LeagueMatchdayResult } from '@fantacomics/scoring';
 import { generateFacts, buildFactPack, buildHistoryEntry, type FactEngineOutput } from '@fantacomics/facts';
@@ -142,7 +144,11 @@ export async function runMatchdayPipeline(input: PipelineInput): Promise<Pipelin
   // 6. Generazione, con verifica di ogni cifra e ripiego garantito.
   const generated = await timed('generate', () => generateEdition({
     plan, pack,
-    teamNames: new Map(input.snapshot.teams.map((t) => [t.teamId, t.teamName])),
+    // safeName anche qui: i nomi passano dal motore dei fatti gia' sanificati,
+    // ma le card li prendono dallo snapshot e sarebbero l'unico percorso verso
+    // il modello privo del controllo. Un controllo applicato quasi ovunque
+    // vale quanto il buco che lascia, e questo era il buco.
+    teamNames: new Map(input.snapshot.teams.map((t) => [t.teamId, safeName(t.teamName)])),
     driver: input.driver ?? new TemplateDriver(),
     ...(input.fallback ? { fallback: input.fallback } : {}),
     spice: input.spice ?? 2,

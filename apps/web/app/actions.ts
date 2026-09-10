@@ -1,11 +1,15 @@
 'use server';
 
 import { redirect } from 'next/navigation';
+import { cookies } from 'next/headers';
 import { revalidatePath } from 'next/cache';
 import { DEFAULT_RULESET, LeagueRulesetSchema, safeName, stableHash } from '@fantacomics/core';
-import { issueMagicLink, ConsoleMailer, FileMailer, randomToken, type Mailer } from '@fantacomics/auth';
+import {
+  issueMagicLink, consumeMagicLink, ConsoleMailer, FileMailer, randomToken,
+  MAGIC_LINK_TTL_MS, type Mailer,
+} from '@fantacomics/auth';
 import { authStore } from '@/lib/store';
-import { requireAccount } from '@/lib/session';
+import { requireAccount, startSession, NONCE_COOKIE } from '@/lib/session';
 import { importFromFiles, generateWorld, withOfficialScores, nudgeTeamToScore } from '@fantacomics/ingest';
 import { runMatchdayPipeline } from '@fantacomics/pipeline';
 import { TemplateDriver, AnthropicDriver } from '@fantacomics/llm';
@@ -50,6 +54,23 @@ export async function richiediAccesso(
     return { ok: false, messaggio: 'Questa email non sembra valida.' };
   }
 
+  /**
+   * Il nonce resta su QUESTO browser e non viaggia mai nel link.
+   * Al ritorno, il browser che lo presenta e' lo stesso che ha chiesto
+   * l'accesso e non serve altro; un browser che non ce l'ha non viene
+   * respinto — l'apertura da un altro dispositivo e' legittima e comune —
+   * ma deve passare da una conferma che dice a schermo in quale account
+   * sta per entrare. E' quella riga a rendere inutile inoltrare il link:
+   * chi lo riceve legge un indirizzo che non e' il suo.
+   */
+  (await cookies()).set(NONCE_COOKIE, esito.nonce, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    path: '/accedi',
+    maxAge: Math.floor(MAGIC_LINK_TTL_MS / 1000),
+  });
+
   const link = `${baseUrl()}/accedi/${esito.token}`;
   await mailer().send(
     email,
@@ -66,6 +87,29 @@ export async function richiediAccesso(
     messaggio: 'Se l\u2019indirizzo e\u2019 valido, il link di accesso e\u2019 partito. Controlla la posta.',
     ...(mostraLinkInChiaro() ? { linkSviluppo: link } : {}),
   };
+}
+
+/**
+ * Conferma esplicita dell'accesso da un dispositivo diverso da quello che ha
+ * chiesto il link.
+ *
+ * E' una SERVER ACTION e non una GET per una ragione sola: le server action
+ * sono POST con verifica dell'origine, quindi non si attivano navigando. Una
+ * GET che apre una sessione si attiva con un click su un link qualunque, ed
+ * e' esattamente cio' da cui questa pagina protegge.
+ */
+export async function confermaAccesso(token: string, _form: FormData): Promise<void> {
+  const esito = await consumeMagicLink(authStore, token);
+  if (!esito.ok) {
+    const motivo =
+      esito.reason === 'scaduto' ? 'scaduto'
+      : esito.reason === 'gia-usato' ? 'usato'
+      : 'sconosciuto';
+    redirect(`/accedi?errore=${motivo}`);
+  }
+  await startSession(esito.accountId);
+  (await cookies()).delete(NONCE_COOKIE);
+  redirect('/');
 }
 
 function driver() {

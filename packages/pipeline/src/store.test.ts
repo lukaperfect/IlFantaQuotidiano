@@ -4,7 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pg from 'pg';
 import { DEFAULT_RULESET } from '@fantacomics/core';
-import { issueMagicLink, consumeMagicLink, hashToken, type AuthStore } from '@fantacomics/auth';
+import {
+  issueMagicLink, consumeMagicLink, peekMagicLink, hashToken, type AuthStore,
+} from '@fantacomics/auth';
 import { FileLeagueStore, type LeagueStore } from './store.js';
 import { FileAuthStore } from './auth-store.js';
 import { PostgresLeagueStore, PostgresAuthStore, migrate } from './postgres-store.js';
@@ -197,6 +199,39 @@ for (const impl of implementazioni) {
       if (!secondo.ok) expect(secondo.reason).toBe('gia-usato');
     });
 
+    it('marca il link una volta sola, e lo dice', async () => {
+      const issued = await issueMagicLink(env.auth, 'marca@example.com');
+      if (!issued.ok) throw new Error('atteso ok');
+      const hash = hashToken(issued.token);
+
+      expect(await env.auth.markMagicLinkUsed(hash, 1)).toBe(true);
+      // Il secondo tentativo non deve poter dire di aver vinto: e' questo
+      // booleano a decidere se una sessione si apre, e se mente due richieste
+      // simultanee ne aprono due dallo stesso token.
+      expect(await env.auth.markMagicLinkUsed(hash, 2)).toBe(false);
+      expect(await env.auth.markMagicLinkUsed('hash-mai-esistito', 3)).toBe(false);
+    });
+
+    it('lega il link al browser che l’ha chiesto, e guardarlo non lo consuma', async () => {
+      const issued = await issueMagicLink(env.auth, 'nonce@example.com');
+      if (!issued.ok) throw new Error('atteso ok');
+
+      expect(await peekMagicLink(env.auth, issued.token, issued.nonce))
+        .toEqual({ ok: true, accountId: issued.accountId, stessoBrowser: true });
+
+      // Nonce sbagliato o assente: il link resta valido — aprirlo da un altro
+      // dispositivo e' legittimo — ma non e' piu' lo stesso browser, quindi
+      // si passa dalla conferma.
+      expect(await peekMagicLink(env.auth, issued.token, 'un-altro-nonce'))
+        .toMatchObject({ ok: true, stessoBrowser: false });
+      expect(await peekMagicLink(env.auth, issued.token, undefined))
+        .toMatchObject({ ok: true, stessoBrowser: false });
+
+      // Tre letture e il link e' ancora spendibile: se guardarlo lo bruciasse,
+      // la pagina di conferma mostrerebbe un token gia' morto.
+      expect((await consumeMagicLink(env.auth, issued.token)).ok).toBe(true);
+    });
+
     it('non duplica l’account sulla stessa email', async () => {
       const a = await issueMagicLink(env.auth, 'a@b.it', { now: 1_000_000 });
       const b = await issueMagicLink(env.auth, 'a@b.it', { now: 1_000_000 + 60_000 });
@@ -225,6 +260,23 @@ describe('FileStore — dettagli di implementazione', () => {
     const contenuto = await readFile(join(root, 'auth.json'), 'utf8');
     expect(contenuto).not.toContain(issued.token);
     expect(contenuto).toContain(hashToken(issued.token));
+    // Vale anche per il nonce: e' l'altra meta' della credenziale, e in
+    // chiaro renderebbe il legame col browser aggirabile da chi legge il file.
+    expect(contenuto).not.toContain(issued.nonce);
+    expect(contenuto).toContain(hashToken(issued.nonce));
+  });
+
+  it('un id di lega con risalite non esce dalla cartella', async () => {
+    const store = new FileLeagueStore(root);
+    // Da fuori l'id arriva dall'URL di /lega/[id]. La risposta giusta e'
+    // "non trovata" — la stessa che riceve chi chiede la lega di un altro.
+    expect(await store.getConfigForOwner('../../etc/passwd', 'acc-mario')).toBeNull();
+    expect(await store.getConfigForOwner('..', 'acc-mario')).toBeNull();
+    expect(await store.getConfigForOwner('', 'acc-mario')).toBeNull();
+
+    // Su ogni altro percorso il fallimento e' rumoroso: un id fuori forma non
+    // e' un caso previsto, e passarlo oltre significherebbe scrivere altrove.
+    await expect(store.getMemory('../fuga')).rejects.toThrow(/segmento di percorso/);
   });
 
   it('sopravvive a un riavvio del processo', async () => {
@@ -235,10 +287,10 @@ describe('FileStore — dettagli di implementazione', () => {
 });
 
 describe.skipIf(!DB)('PostgresStore — garanzie che il file store non può dare', () => {
-  it('due consumi simultanei dello stesso link aprono una sola sessione', async () => {
+  it('tre consumi che leggono tutti il link libero aprono una sola sessione', async () => {
     // Il file store non puo' garantirlo: legge, decide e scrive senza
-    // atomicita'. Postgres si', grazie al `used_at is null` nella WHERE.
-    // La differenza e' documentata, non nascosta.
+    // atomicita'. Postgres si', grazie al `used_at is null` nella WHERE —
+    // ma solo se il chiamante guarda quante righe ha aggiornato.
     const pool = new pg.Pool({ connectionString: DB });
     try {
       await migrate(pool);
@@ -248,16 +300,49 @@ describe.skipIf(!DB)('PostgresStore — garanzie che il file store non può dare
       const issued = await issueMagicLink(auth, 'gara@example.com');
       if (!issued.ok) throw new Error('atteso ok');
 
+      /**
+       * BARRIERA. Tre `Promise.all` non bastano a produrre la corsa: il pool
+       * e il ciclo di eventi finiscono per serializzare le letture, la seconda
+       * vede gia' `used_at` valorizzato e il caso interessante non capita mai.
+       * Questo test lo sapeva fare male: passava anche azzerando la garanzia,
+       * cioe' non verificava cio' che il titolo dice.
+       *
+       * Qui le tre letture vengono trattenute finche' non sono TUTTE
+       * avvenute. E' il caso reale — tre richieste che hanno visto il link
+       * libero — e a quel punto l'unico arbitro possibile e' la scrittura.
+       */
+      let letti = 0;
+      let apriLeScritture!: () => void;
+      const tutteLette = new Promise<void>((r) => { apriLeScritture = r; });
+
+      const conBarriera: AuthStore = {
+        getAccountByEmail: (e) => auth.getAccountByEmail(e),
+        getAccount: (id) => auth.getAccount(id),
+        createAccount: (a) => auth.createAccount(a),
+        saveMagicLink: (l) => auth.saveMagicLink(l),
+        getMagicLink: async (h) => {
+          const link = await auth.getMagicLink(h);
+          if (++letti === 3) apriLeScritture();
+          await tutteLette;
+          return link;
+        },
+        markMagicLinkUsed: (h, u) => auth.markMagicLinkUsed(h, u),
+        lastIssuedAt: (e) => auth.lastIssuedAt(e),
+        recordIssued: (e, a) => auth.recordIssued(e, a),
+      };
+
       const esiti = await Promise.all([
-        consumeMagicLink(auth, issued.token),
-        consumeMagicLink(auth, issued.token),
-        consumeMagicLink(auth, issued.token),
+        consumeMagicLink(conBarriera, issued.token),
+        consumeMagicLink(conBarriera, issued.token),
+        consumeMagicLink(conBarriera, issued.token),
       ]);
+
       const { rows } = await pool.query(
         'select used_at from magic_links where token_hash = $1', [hashToken(issued.token)],
       );
       expect(rows[0]?.used_at).not.toBeNull();
-      expect(esiti.filter((e) => e.ok).length).toBeGreaterThanOrEqual(1);
+      expect(esiti.filter((e) => e.ok).length).toBe(1);
+      expect(esiti.filter((e) => !e.ok && e.reason === 'gia-usato').length).toBe(2);
     } finally {
       await pool.end();
     }

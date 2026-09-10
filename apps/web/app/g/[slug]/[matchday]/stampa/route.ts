@@ -19,6 +19,15 @@ export async function GET(
   if (!published) return new Response('Edizione non trovata', { status: 404 });
 
   return new Response(renderPrintPage(published.edition, published.pack, { personaNames }), {
-    headers: { 'content-type': 'text/html; charset=utf-8' },
+    headers: {
+      'content-type': 'text/html; charset=utf-8',
+      /**
+       * Come le due sorelle, e per la stessa ragione: l'indirizzo e' un
+       * segreto revocabile, e una risposta che resta in cache fa sopravvivere
+       * il vecchio link alla revoca. Questa route era l'unica delle tre a non
+       * dirlo, il che rendeva la revoca vera per due uscite su tre.
+       */
+      'cache-control': 'no-store',
+    },
   });
 }

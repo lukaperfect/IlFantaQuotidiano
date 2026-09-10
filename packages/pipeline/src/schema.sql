@@ -19,6 +19,10 @@ create table if not exists magic_links (
   expires_at  bigint not null,
   used_at     bigint
 );
+-- Hash del nonce del browser richiedente. Aggiunto dopo, quindi come ALTER:
+-- `create table if not exists` non tocca una tabella che esiste gia', e uno
+-- schema che si applica solo ai database nuovi non e' uno schema.
+alter table magic_links add column if not exists nonce_hash text;
 -- La potatura dei link scaduti scandisce su expires_at.
 create index if not exists magic_links_expires_at_idx on magic_links (expires_at);
 

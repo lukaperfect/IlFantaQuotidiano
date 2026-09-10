@@ -37,7 +37,8 @@ async function nuovaSessione() {
   return { ctx, page };
 }
 
-async function accedi(page, email) {
+/** Chiede il link e lo legge dalla posta, SENZA aprirlo. */
+async function chiediLink(page, email) {
   const prima = await ultimoLinkDalLog();
   await page.goto(`${base}/accedi`, { waitUntil: 'domcontentloaded' });
   await page.fill('input[name="email"]', email);
@@ -54,7 +55,12 @@ async function accedi(page, email) {
     else await page.waitForTimeout(250);
   }
   if (!href) throw new Error('nessun magic link trovato nel log del mailer');
+  return href;
+}
 
+async function accedi(page, email) {
+  const href = await chiediLink(page, email);
+  // Stesso browser che ha chiesto il link: deve entrare senza attrito.
   await page.goto(href, { waitUntil: 'domcontentloaded' });
   await page.waitForURL(`${base}/`, { timeout: 15000 }).catch(() => {});
   return href;
@@ -79,6 +85,41 @@ const riuso = await nuovaSessione();
 await riuso.page.goto(linkUsato, { waitUntil: 'domcontentloaded' });
 ok('magic link monouso', riuso.page.url().includes('errore=usato'), riuso.page.url());
 await riuso.ctx.close();
+
+/**
+ * 3-bis. Un link APERTO DA UN ALTRO BROWSER non apre una sessione da solo.
+ *
+ * E' il caso che conta: chi chiede un link per se' e lo gira a qualcun altro
+ * autenticherebbe il browser di quella persona nel PROPRIO account — e da
+ * quel momento tutto cio' che carica finisce in un archivio non suo, senza
+ * nessuno dei segnali che rendono riconoscibile una truffa, perche' dominio,
+ * certificato e interfaccia sono quelli veri.
+ */
+const chiedente = await nuovaSessione();
+const linkGirato = await chiediLink(chiedente.page, 'chiara@example.com');
+
+const altroDispositivo = await nuovaSessione();
+await altroDispositivo.page.goto(linkGirato, { waitUntil: 'domcontentloaded' });
+ok('link aperto altrove non entra ma chiede conferma',
+   altroDispositivo.page.url().endsWith('/conferma'), altroDispositivo.page.url());
+ok('la conferma dice in quale account si sta entrando',
+   (await altroDispositivo.page.locator('.account-conferma').innerText()).trim()
+     === 'chiara@example.com');
+
+// E finche' non si conferma, nessuna sessione: la home resta chiusa.
+await altroDispositivo.page.goto(`${base}/`, { waitUntil: 'domcontentloaded' });
+await altroDispositivo.page.waitForURL('**/accedi', { timeout: 15000 }).catch(() => {});
+ok('nessuna sessione prima della conferma',
+   altroDispositivo.page.url().includes('/accedi'), altroDispositivo.page.url());
+
+// Confermando si entra: aprire da un altro dispositivo resta legittimo.
+await altroDispositivo.page.goto(linkGirato, { waitUntil: 'domcontentloaded' });
+await altroDispositivo.page.click('button:has-text("Sono io, entra")');
+await altroDispositivo.page.waitForURL(`${base}/`, { timeout: 15000 }).catch(() => {});
+ok('la conferma esplicita apre la sessione',
+   altroDispositivo.page.url() === `${base}/`, altroDispositivo.page.url());
+await altroDispositivo.ctx.close();
+await chiedente.ctx.close();
 
 await mario.page.click('text=Collega una lega');
 await mario.page.waitForURL('**/lega/nuova');

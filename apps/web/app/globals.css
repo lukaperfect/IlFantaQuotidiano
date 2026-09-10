@@ -77,6 +77,14 @@ legend { font-family: var(--grotesque); font-size: .7rem; text-transform: upperc
 
 .notice { border-left: 4px solid var(--accent); background: var(--paper-alt); padding: 12px 14px; }
 .error { border-left-color: var(--accent); }
+/* L'indirizzo sulla conferma di accesso: e' il dato che decide se andare
+   avanti o chiudere la pagina, quindi si legge senza doverlo cercare. */
+.account-conferma {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 1.15rem; word-break: break-all;
+  background: var(--paper-alt); border: 1px solid var(--rule);
+  padding: 14px 16px; margin: 4px 0 16px;
+}
 table { width: 100%; border-collapse: collapse; font-size: .92rem; }
 th, td { text-align: left; padding: .4em .5em; border-bottom: 1px solid var(--paper-alt); }
 .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }

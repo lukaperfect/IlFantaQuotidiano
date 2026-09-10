@@ -82,10 +82,34 @@ type LeagueState = {
   history: HistoricalMatchday[];
 };
 
+/**
+ * Un solo segmento: niente separatori, niente risalite, niente nomi vuoti.
+ * L'underscore iniziale serve (`_index.json`); il punto iniziale no, ed e'
+ * proprio quello che apre `..`.
+ */
+const SEGMENTO_VALIDO = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,119}$/;
+
 export class FileLeagueStore implements LeagueStore {
   constructor(private readonly root: string) {}
 
+  /**
+   * Un id di lega arriva dall'URL: non e' un nome di file finche' non lo si e'
+   * verificato. Oggi non esiste una via d'uscita, perche' ogni lettura passa
+   * comunque dal confronto sul proprietario; ma il giorno in cui un chiamante
+   * saltasse quel confronto, `../../` in un id trasformerebbe lo store in
+   * lettura e scrittura arbitraria di file.
+   *
+   * Il controllo sta QUI perche' questo e' il punto in cui un id diventa un
+   * percorso: metterlo nei chiamanti significa affidarsi al fatto che tutti se
+   * lo ricordino, ed e' esattamente il tipo di garanzia che invecchia male.
+   * Un segmento fuori forma non e' un caso previsto, quindi tira.
+   */
   private path(...parts: string[]): string {
+    for (const part of parts) {
+      if (!SEGMENTO_VALIDO.test(part)) {
+        throw new Error(`segmento di percorso non valido: ${JSON.stringify(part)}`);
+      }
+    }
     return join(resolve(this.root), ...parts);
   }
 
@@ -109,6 +133,11 @@ export class FileLeagueStore implements LeagueStore {
   }
 
   private async readConfig(leagueId: string): Promise<LeagueConfig | null> {
+    // Unico ingresso in cui l'id arriva davvero da fuori (l'URL di /lega/[id]).
+    // Un id malformato e' una lega che non esiste, non un errore da mostrare:
+    // rispondere "non trovata" e' anche cio' che tiene indistinguibili lega
+    // inesistente e lega altrui.
+    if (!SEGMENTO_VALIDO.test(`${leagueId}.json`)) return null;
     return this.readJson<LeagueConfig | null>(this.path('config', `${leagueId}.json`), null);
   }
 
