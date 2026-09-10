@@ -1,0 +1,4 @@
+.next/
+.data/
+shots/
+next-env.d.ts

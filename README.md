@@ -3,11 +3,10 @@
 Genera automaticamente un giornale sportivo satirico personalizzato per ogni
 lega di fantacalcio, a partire dai dati ufficiali della giornata.
 
-> **Stato**: fondamenta complete e verificate end-to-end. Il motore di calcolo,
-> il fact engine, il selector editoriale, la pipeline LLM, il rendering e
-> l'ingestion sono implementati e testati. Manca l'adapter verso una
-> piattaforma reale, l'app web e l'infrastruttura di consegna: vedi
-> [Cosa manca](#cosa-manca).
+> **Stato**: prodotto funzionante end-to-end. Un admin può collegare una lega,
+> generare le edizioni e leggere il giornale dall'app web. Manca l'adapter
+> verso una piattaforma reale, la persistenza su database e la consegna
+> automatica: vedi [Cosa manca](#cosa-manca).
 
 ## La tesi architetturale
 
@@ -33,10 +32,19 @@ Da qui tre inversioni che governano tutto il codice:
 
 ```bash
 pnpm install
-pnpm test                                   # 149 test
+pnpm test                                   # 151 test
 pnpm demo -- --out out --giornate 6         # una stagione simulata end-to-end
 pnpm demo -- --out out --giornate 4 --assets   # aggiunge PDF e PNG reali (serve Chromium)
+
+# L'app web
+pnpm --filter @fantacomics/web build
+pnpm --filter @fantacomics/web start        # http://localhost:3000
 ```
+
+Nell'app: **Collega una lega → Genera la lega di prova** crea tre giornate con
+dati realistici e porta direttamente al giornale. Serve a vedere il prodotto
+prima di mettersi a esportare file — chiedere cinque CSV a un admin che non ha
+ancora visto niente è il modo più sicuro di perderlo.
 
 La demo scrive in `out/`: `giornale.html` (web responsive),
 `giornale-stampa.html` + `giornale.pdf` (broadsheet A3), una card SVG/PNG per
@@ -56,7 +64,9 @@ driver template.
 | `llm` | Prefisso congelato, grounding, routing, ripiego | L'unico punto in cui il sistema non è deterministico |
 | `render` | Un IR, tre uscite (web, broadsheet, card) | Puro: solo stringhe, niente browser |
 | `ingest` | Adapter, collector, macchina a stati, canary | La parte che sopravvive ai redesign altrui |
-| `apps/worker` | Pipeline orchestrata, persistenza, PDF/PNG | Container long-running: Chromium non sta in serverless |
+| `pipeline` | Pipeline a sette step, store, configurazione lega | Condivisa tra worker e app web |
+| `apps/worker` | CLI della stagione, generazione PDF/PNG | Container long-running: Chromium non sta in serverless |
+| `apps/web` | Onboarding, archivio, lettura, card condivisibili | Il piano di controllo; il giornale resta un documento autonomo |
 
 ## Le decisioni che contano
 
@@ -96,18 +106,20 @@ tentativo.
 Per andare in produzione servono, nell'ordine:
 
 1. **Un adapter reale** verso una piattaforma di fantacalcio, più l'estensione
-   browser che ne è il collector consigliato. Il contratto e il canary ci sono;
-   manca la mappatura dei campi veri.
-2. **L'app web** (Next.js): onboarding lega, configurazione regolamento e
-   livello di piccante, archivio edizioni.
-3. **Persistenza vera**: `LeagueStore` è implementato su file; in produzione va
+   browser che ne è il collector consigliato. Il contratto, l'endpoint di relay
+   (`POST /api/relay`) e il canary ci sono; manca la mappatura dei campi veri.
+2. **Persistenza vera**: `LeagueStore` è implementato su file; in produzione va
    su Postgres, con pgvector per la memoria semantica anti-ripetizione.
+3. **Autenticazione e multi-tenant**: oggi chiunque raggiunga l'app vede tutte
+   le leghe. Serve prima di qualsiasi deploy pubblico.
 4. **Consegna**: bot Telegram per l'automazione, PWA con Web Share API per la
    condivisione su WhatsApp (l'API di WhatsApp non scrive nei gruppi: qualsiasi
    piano che lo assuma è irrealizzabile).
 5. **Fonte xG** con licenza commerciale verificata.
 6. **Revisione umana al 100%** per le prime settimane: è così che si costruisce
    il dataset di stile, non un ripiego.
+7. **Il driver Anthropic contro l'API vera**: il codice c'è e l'assemblaggio
+   della richiesta è testato, ma finora ha girato solo il driver template.
 
 ## Licenza e dati
 

@@ -1,0 +1,28 @@
+{
+  "name": "@fantacomics/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start -p 3000"
+  },
+  "dependencies": {
+    "@fantacomics/core": "workspace:*",
+    "@fantacomics/editorial": "workspace:*",
+    "@fantacomics/facts": "workspace:*",
+    "@fantacomics/ingest": "workspace:*",
+    "@fantacomics/llm": "workspace:*",
+    "@fantacomics/pipeline": "workspace:*",
+    "@fantacomics/render": "workspace:*",
+    "@fantacomics/scoring": "workspace:*",
+    "next": "^15.1.3",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2"
+  }
+}

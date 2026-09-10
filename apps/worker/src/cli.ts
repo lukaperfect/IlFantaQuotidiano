@@ -3,8 +3,8 @@ import {
   generateWorld, withOfficialScores, nudgeTeamToScore, injectGoldenBench,
 } from '@fantacomics/ingest';
 import { TemplateDriver, AnthropicDriver, type LlmDriver } from '@fantacomics/llm';
-import { runMatchdayPipeline } from './pipeline.js';
-import { FileLeagueStore } from './store.js';
+import { runMatchdayPipeline } from '@fantacomics/pipeline';
+import { FileLeagueStore } from '@fantacomics/pipeline';
 import { AssetRenderer, writeText } from './assets.js';
 
 /**

@@ -1,18 +1,18 @@
 {
-  "name": "@fantacomics/worker",
+  "name": "@fantacomics/pipeline",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": { ".": "./src/index.ts" },
   "dependencies": {
-    "@fantacomics/pipeline": "workspace:*",
     "@fantacomics/core": "workspace:*",
     "@fantacomics/scoring": "workspace:*",
     "@fantacomics/facts": "workspace:*",
     "@fantacomics/editorial": "workspace:*",
     "@fantacomics/llm": "workspace:*",
     "@fantacomics/render": "workspace:*",
-    "@fantacomics/ingest": "workspace:*",
-    "playwright": "^1.49.0"
+    "@fantacomics/ingest": "workspace:*"
   }
 }

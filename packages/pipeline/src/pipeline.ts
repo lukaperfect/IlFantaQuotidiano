@@ -155,7 +155,7 @@ export async function runMatchdayPipeline(input: PipelineInput): Promise<Pipelin
       personaIds: plan.articles.map((a) => a.persona.id),
       appearances: appearancesOf(plan),
     }));
-    await input.store.saveEdition(leagueId, generated.edition);
+    await input.store.saveEdition(leagueId, generated.edition, pack);
     await input.store.addToCorpus([...result.scores.values()].map((s) => s.total));
   });
 

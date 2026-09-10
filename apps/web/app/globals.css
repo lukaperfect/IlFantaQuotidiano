@@ -1,0 +1,82 @@
+:root {
+  --paper: #f4f1e8;
+  --paper-alt: #eae5d8;
+  --ink: #16130f;
+  --ink-soft: #4a443a;
+  --rule: #16130f;
+  --accent: #8a1c1c;
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  --grotesque: "Helvetica Neue", Helvetica, Arial, system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #14120e; --paper-alt: #1d1a15; --ink: #ece7dc;
+    --ink-soft: #a49c8c; --rule: #6b6558; --accent: #e0685f;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font-family: var(--serif); font-size: 17px; line-height: 1.55;
+  -webkit-text-size-adjust: 100%;
+}
+.wrap { max-width: 860px; margin: 0 auto; padding-block: 32px; padding-inline: 20px; }
+a { color: inherit; }
+
+.top { border-bottom: 3px double var(--rule); padding-bottom: 12px; margin-bottom: 26px; }
+.top h1 { font-size: clamp(2rem, 6vw, 3rem); margin: 0; letter-spacing: -.02em; font-weight: 800; }
+.kicker {
+  font-family: var(--grotesque); text-transform: uppercase;
+  letter-spacing: .14em; font-size: .66rem; color: var(--ink-soft); margin: 0 0 .3em;
+}
+h2 { font-size: 1.3rem; margin: 2rem 0 .6rem; }
+p { margin: 0 0 .8em; }
+.muted { color: var(--ink-soft); }
+.small { font-size: .86rem; }
+
+.card-list { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.item {
+  border: 1px solid var(--rule); padding: 14px 16px;
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; justify-content: space-between;
+}
+.item strong { font-size: 1.1rem; }
+
+.btn {
+  display: inline-block; font-family: var(--grotesque); font-size: .78rem;
+  text-transform: uppercase; letter-spacing: .1em; font-weight: 700;
+  border: 1px solid var(--rule); background: transparent; color: var(--ink);
+  padding: .6em 1.1em; cursor: pointer; text-decoration: none;
+}
+.btn:hover { background: var(--ink); color: var(--paper); }
+.btn--primary { background: var(--accent); border-color: var(--accent); color: var(--paper); }
+.btn--primary:hover { filter: brightness(1.15); background: var(--accent); color: var(--paper); }
+
+form { display: grid; gap: 16px; }
+label { display: grid; gap: 6px; font-family: var(--grotesque); font-size: .72rem;
+  text-transform: uppercase; letter-spacing: .1em; color: var(--ink-soft); }
+/* Il suggerimento dentro una label non e' un secondo campo: va tolto dal
+   maiuscolo, altrimenti si legge come un'altra etichetta. */
+label .hint {
+  text-transform: none; letter-spacing: 0; font-family: var(--serif);
+  font-size: .82rem; font-style: italic;
+}
+label.check {
+  display: flex; align-items: center; gap: 8px;
+  text-transform: none; letter-spacing: 0; font-size: 1rem;
+  font-family: var(--serif); color: var(--ink);
+}
+label.check input { width: auto; }
+input, select, textarea {
+  font-family: var(--serif); font-size: 1rem; color: var(--ink);
+  background: var(--paper-alt); border: 1px solid var(--rule); padding: .55em .7em;
+  width: 100%; border-radius: 0;
+}
+textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .82rem; min-height: 120px; }
+fieldset { border: 1px solid var(--rule); padding: 16px; display: grid; gap: 14px; }
+legend { font-family: var(--grotesque); font-size: .7rem; text-transform: uppercase; letter-spacing: .12em; padding: 0 .4em; }
+
+.notice { border-left: 4px solid var(--accent); background: var(--paper-alt); padding: 12px 14px; }
+.error { border-left-color: var(--accent); }
+table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+th, td { text-align: left; padding: .4em .5em; border-bottom: 1px solid var(--paper-alt); }
+.row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }

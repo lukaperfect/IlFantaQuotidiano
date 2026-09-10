@@ -41,6 +41,12 @@ jobs:
       - name: Test
         run: pnpm test
 
+      - name: Build dell'app web
+        # `next build` e' l'unico controllo di tipi che copre apps/web: il
+        # tsconfig radice non include l'app, quindi senza questo passo un
+        # errore di tipo nell'app arriverebbe fino in produzione.
+        run: pnpm --filter @fantacomics/web build
+
       - name: Demo end-to-end
         # Il vero test di integrazione: la pipeline di produzione deve
         # produrre un giornale completo su piu' giornate consecutive.

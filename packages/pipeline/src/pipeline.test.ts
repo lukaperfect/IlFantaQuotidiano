@@ -54,7 +54,14 @@ describe('pipeline end-to-end', () => {
     expect(Object.keys(memory.lastFormatUse).length).toBeGreaterThan(0);
     expect(Object.keys(memory.lastAppearance)).toHaveLength(8);
 
-    expect(store.getEdition('lega-test', 12)).toBeDefined();
+    // getEdition e' async: senza await l'asserzione passerebbe a vuoto
+    // perche' una Promise e' sempre "defined".
+    const published = await store.getEdition('lega-test', 12);
+    expect(published?.edition.meta.matchday).toBe(12);
+    // Il pack va persistito con l'edizione: senza, il giornale non si rilegge.
+    expect(published?.pack.facts.length).toBeGreaterThan(0);
+    expect(published?.pack.results.length).toBeGreaterThan(0);
+    expect(await store.listEditions('lega-test')).toEqual([12]);
     const corpus = await store.getCorpus();
     expect(corpus?.sortedTeamPoints).toHaveLength(8);
   });
@@ -137,5 +144,30 @@ describe('degrado e revisione', () => {
   it('la soglia di pubblicazione separa online da coda di revisione', async () => {
     const out = await run(12, new InMemoryLeagueStore());
     expect(out.publishable).toBe(out.confidence >= MIN_PUBLISH_CONFIDENCE);
+  });
+});
+
+describe('configurazione della lega', () => {
+  it('registra la lega e tiene aggiornata l’ultima giornata pubblicata', async () => {
+    const store = new InMemoryLeagueStore();
+    await store.saveConfig({
+      leagueId: 'lega-test', leagueName: 'Lega Test', ruleset: R, spice: 2,
+      createdAt: '2026-01-01T00:00:00Z', lastMatchday: null,
+    });
+
+    expect(await store.listLeagues()).toHaveLength(1);
+    await run(11, store);
+    await run(12, store);
+
+    expect(await store.listEditions('lega-test')).toEqual([12, 11]);
+    const config = await store.getConfig('lega-test');
+    expect(config?.leagueName).toBe('Lega Test');
+  });
+
+  it('restituisce null per una lega sconosciuta invece di lanciare', async () => {
+    const store = new InMemoryLeagueStore();
+    expect(await store.getConfig('inesistente')).toBeNull();
+    expect(await store.getEdition('inesistente', 1)).toBeNull();
+    expect(await store.listEditions('inesistente')).toEqual([]);
   });
 });
