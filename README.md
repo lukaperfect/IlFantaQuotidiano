@@ -33,7 +33,7 @@ Da qui tre inversioni che governano tutto il codice:
 
 ```bash
 pnpm install
-pnpm test                                   # 237 test (222 senza database)
+pnpm test                                   # 253 test (238 senza database)
 pnpm demo -- --out out --giornate 6         # una stagione simulata end-to-end
 pnpm demo -- --out out --giornate 4 --assets   # aggiunge PDF e PNG reali (serve Chromium)
 
@@ -150,7 +150,27 @@ si vede solo dalla fattura.
 **La giornata non è pronta il martedì.** La Serie A gioca il lunedì sera, ha
 turni infrasettimanali e rinvii. Il cron decide *quando consegnare*; una
 macchina a stati decide *quando è pronto* — partite chiuse, voti sopra soglia e
-stabili su letture consecutive.
+stabili su letture consecutive. Il `tickConsegne` è il punto in cui le due
+domande si incontrano: una passata sola, non un ciclo, così gira da un cron, da
+una coda durabile o da un test senza cambiare una riga. Legge la giornata
+globale **una volta per giornata, non una per lega** — con cinquecento leghe
+sulla stessa giornata, chiederla per lega significa cinquecento richieste
+identiche e un ban meritato — ed è idempotente, perché un cron che ripubblica a
+ogni passata è peggio di un cron che non parte.
+
+**Il segnale che una giornata è finita non è la quota di voti.** Sul percorso
+dell'estensione non c'è un osservatore che ricontrolla a intervalli: c'è una
+persona che preme «Cattura» quando le pare. Se preme di domenica sera metà
+Serie A non ha giocato, e la riconciliazione non se ne accorge — i punteggi
+ufficiali parziali tornano benissimo con quelli parziali ricalcolati. La prima
+versione del controllo contava i titolari con un voto e chiedeva il 90%:
+misurato sui dati, una giornata *completa* sta fra il 67% e l'81%, perché i
+senza voto esistono e sono legittimi. Quella soglia bocciava giornate finite,
+che è il modo peggiore di sbagliare. Il segnale giusto è strutturale: **una
+squadra di Serie A che non ha giocato non ha nessun voto**, mentre una che ha
+giocato ne ha undici. Misurato: 20 squadre su 20 a giornata completa, 10 su 20
+a metà, identico su ogni seed — e non dipende da quanti senza voto ci siano,
+che è proprio la quantità impossibile da calibrare senza dati veri.
 
 **Il giornale non può ripetersi.** Il cooldown su tipi di fatto e format
 impedisce di raccontare le stesse cose; una guardia sugli n-grammi impedisce di

@@ -119,6 +119,34 @@ async function main(): Promise<void> {
      deriva.status === 422 && derivaEsito.stato === 'deriva-sospetta',
      `status ${deriva.status}`);
 
+  // 5-bis. Una giornata a meta' non si pubblica.
+  //
+  // Qui non c'e' un osservatore a intervalli: c'e' una persona che preme
+  // "Cattura" quando le pare. Se preme di domenica sera meta' Serie A non ha
+  // giocato, e la riconciliazione non se ne accorge — i punteggi ufficiali
+  // parziali tornano benissimo con quelli parziali ricalcolati.
+  const aMeta = structuredClone(envelope) as typeof envelope;
+  const votiMeta = aMeta.payloads.voti as {
+    data: { giocatori: { squadra: string; stats: Record<string, unknown> }[] };
+  };
+  const squadre = [...new Set(votiMeta.data.giocatori.map((g) => g.squadra))].sort();
+  const nonGiocate = new Set(squadre.slice(0, Math.floor(squadre.length / 2)));
+  for (const g of votiMeta.data.giocatori) {
+    if (nonGiocate.has(g.squadra)) { g.stats.voto = null; g.stats.minuti = 0; }
+  }
+  aMeta.matchday = 9;
+  const meta = await posta(chiave, aMeta);
+  const metaEsito = await meta.json() as { stato?: string; squadreSenzaVoto?: string[] };
+  ok('una giornata a meta’ viene rifiutata invece che pubblicata',
+     meta.status === 409 && metaEsito.stato === 'giornata-non-pronta',
+     `status ${meta.status}`);
+  ok('e dice quali squadre non hanno ancora un voto',
+     (metaEsito.squadreSenzaVoto?.length ?? 0) === nonGiocate.size,
+     `${metaEsito.squadreSenzaVoto?.length} squadre`);
+  const nonPubblicata = await fetch(`${base}/g/${publicSlug}/9`);
+  ok('e infatti quella giornata non esiste', nonPubblicata.status === 404,
+     `status ${nonPubblicata.status}`);
+
   // 6. Revocare la chiave la spegne subito.
   const config = await store.getConfigForOwner(leagueId, 'acc-verifica');
   await store.saveConfig({ ...config!, relaySecret: null });

@@ -1,6 +1,7 @@
 import {
   parseEnvelope, importFromRelay, coperturaMinima, detectDrift, profiloDi,
-  stagioneDi, AdapterError,
+  stagioneDi, osservazioneDaGiornata, evaluateReadiness, POLITICA_LETTURA_SINGOLA,
+  AdapterError,
 } from '@fantacomics/ingest';
 import { runMatchdayPipeline } from '@fantacomics/pipeline';
 import { TemplateDriver, AnthropicDriver } from '@fantacomics/llm';
@@ -132,6 +133,38 @@ export async function POST(request: Request): Promise<Response> {
         nota: 'Il profilo non estrae abbastanza campi: la piattaforma e’ probabilmente ' +
               'cambiata. Nulla e’ stato pubblicato.',
       }, 422);
+    }
+
+    /**
+     * LA GIORNATA E' FINITA?
+     *
+     * Qui non c'e' un osservatore che ricontrolla a intervalli: c'e' una
+     * persona che preme "Cattura" quando le pare. Se preme di domenica sera,
+     * meta' Serie A non ha giocato e il giornale esce pieno di senza voto —
+     * e la riconciliazione non se ne accorge, perche' i punteggi ufficiali
+     * parziali tornano benissimo con quelli parziali ricalcolati.
+     *
+     * La macchina a stati esisteva gia' e questo percorso la scavalcava. Era
+     * l'unico ingresso vivo del sistema, quindi la scavalcava sempre.
+     */
+    const osservazione = osservazioneDaGiornata(serieA.players, snapshot.lineups, {
+      fetchedAt: envelope.capturedAt,
+      contentHash: serieA.contentHash,
+    });
+    const pronta = evaluateReadiness([osservazione], POLITICA_LETTURA_SINGOLA);
+    if (!pronta.ready) {
+      return json({
+        accettato: false,
+        stato: 'giornata-non-pronta',
+        motivo: pronta.reason,
+        // Nominare le squadre rende il messaggio azionabile: chi legge capisce
+        // se e' presto o se c'e' un rinvio, e sono due situazioni diverse.
+        squadreSenzaVoto: osservazione.squadreSenzaVoto,
+        titolariConVoto: `${osservazione.playersRated}/${osservazione.playersExpected}`,
+        riprovaFraSecondi: pronta.recheckAfterSeconds,
+        nota: 'La giornata non e’ conclusa: pubblicarla adesso significherebbe un ' +
+              'giornale pieno di senza voto. Ricattura quando i voti sono usciti.',
+      }, 409);
     }
 
     /**

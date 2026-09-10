@@ -135,3 +135,81 @@ export function shouldDeliver(
   }
   return { deliver: false, reason: 'Giornata pronta, in attesa della finestra di consegna.' };
 }
+
+/**
+ * L'osservazione ricavata dai dati stessi.
+ *
+ * Serve al percorso dell'estensione, dove non esiste un osservatore che
+ * ricontrolla a intervalli: c'e' una persona che preme "Cattura" quando le
+ * pare. Se preme di domenica sera, meta' Serie A non ha ancora giocato e il
+ * giornale esce pieno di senza voto — con la riconciliazione che non se ne
+ * accorge, perche' i punteggi ufficiali parziali tornano benissimo con quelli
+ * parziali ricalcolati.
+ *
+ * IL SEGNALE GIUSTO NON E' LA QUOTA DI VOTI.
+ *
+ * La prima versione contava i titolari con un voto e chiedeva il 90%. Misurato
+ * sui dati, una giornata COMPLETA sta fra il 67% e l'81%: i senza voto
+ * esistono e sono legittimi. Una soglia su quel numero boccia giornate finite,
+ * che e' il modo peggiore di sbagliare — l'utente non capisce perche' e smette
+ * di fidarsi del controllo.
+ *
+ * Il segnale che separa i due casi in modo netto e' STRUTTURALE: una squadra di
+ * Serie A che non ha ancora giocato non ha NESSUN voto, mentre una che ha
+ * giocato ne ha undici. Misurato: 20 squadre su 20 a giornata completa, 10 su
+ * 20 a meta' giornata, identico su ogni seed. Non dipende da quanti senza voto
+ * ci siano, che e' proprio la quantita' che non posso calibrare senza dati
+ * veri.
+ */
+export function osservazioneDaGiornata(
+  players: readonly { serieATeam: string; playerId: string; vote: number | null }[],
+  lineups: readonly { starters: readonly { playerId: string }[] }[],
+  opts: { fetchedAt: string; contentHash: string },
+): Observation & { squadreSenzaVoto: string[] } {
+  const squadre = new Set(players.map((p) => p.serieATeam));
+  const conVoto = new Set(players.filter((p) => p.vote !== null).map((p) => p.serieATeam));
+  const senzaVoto = [...squadre].filter((t) => !conVoto.has(t)).sort();
+
+  /**
+   * Due squadre per partita, cosi' il messaggio della macchina a stati
+   * ("N partite ancora da giocare") resta quello vero.
+   *
+   * L'arrotondamento va per DIFETTO sulle giocate, e non e' un dettaglio:
+   * con `ceil`, 19 squadre su 20 davano 10 partite su 10 e un rinvio passava
+   * inosservato. Una squadra senza voti significa che la sua partita non e'
+   * completa, quindi quella partita non si conta. Quando non ne manca
+   * nessuna si prende il totale, altrimenti un numero dispari di squadre
+   * non arriverebbe mai a pareggiare il conto.
+   */
+  const partiteTotali = Math.ceil(squadre.size / 2);
+  const partiteGiocate = senzaVoto.length === 0
+    ? partiteTotali
+    : Math.floor(conVoto.size / 2);
+
+  const voti = new Map(players.map((p) => [p.playerId, p.vote]));
+  const schierati = lineups.flatMap((l) => l.starters.map((s) => s.playerId));
+
+  return {
+    fetchedAt: opts.fetchedAt,
+    contentHash: opts.contentHash,
+    matchesFinished: partiteGiocate,
+    matchesTotal: partiteTotali,
+    playersRated: schierati.filter((id) => (voti.get(id) ?? null) !== null).length,
+    playersExpected: schierati.length,
+    squadreSenzaVoto: senzaVoto,
+  };
+}
+
+/**
+ * La politica per una lettura sola.
+ *
+ * `stableReads: 1` non e' un allentamento: qui non ci sono letture consecutive
+ * da confrontare, perche' e' l'utente a decidere quando leggere. Il criterio
+ * che porta il peso e' quello sulle partite, che qui e' strutturale ed esatto.
+ *
+ * `minRatedRatio` sta al 50% come rete di sicurezza, non come criterio: serve
+ * a cogliere una cattura degenere — le squadre risultano presenti ma i voti
+ * quasi tutti assenti — non a giudicare quanti senza voto siano normali. Una
+ * giornata completa misura fra il 67% e l'81%, quindi il margine c'e'.
+ */
+export const POLITICA_LETTURA_SINGOLA: ReadinessPolicy = { minRatedRatio: 0.5, stableReads: 1 };

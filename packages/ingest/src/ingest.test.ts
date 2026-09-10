@@ -11,6 +11,9 @@ import { resolvePath, applyMapping, parseEnvelope, mappingCoverage } from './col
 import { AdapterError, AdapterRegistry } from './adapter.js';
 import { importFromRelay, recordsFromEnvelope, coperturaMinima } from './collectors/relay-import.js';
 import { PROFILO_PROVA } from './profiles.js';
+import {
+  osservazioneDaGiornata, POLITICA_LETTURA_SINGOLA, evaluateReadiness as valuta,
+} from './readiness.js';
 import { payloadPortaleDiProva } from './synthetic-portal.js';
 
 const R = DEFAULT_RULESET;
@@ -384,5 +387,75 @@ describe('due sorgenti, uno snapshot', () => {
       capturedAt: '2026-01-06T08:00:00+01:00', payloads,
     });
     expect(() => recordsFromEnvelope(envelope, PROFILO_PROVA)).toThrow(/formazioni/);
+  });
+});
+
+describe('la giornata e’ finita? il segnale strutturale', () => {
+  /**
+   * Il controllo che serve al percorso dell'estensione, dove non c'e' un
+   * osservatore a intervalli ma una persona che preme "Cattura" quando le pare.
+   * Deve sbagliare in nessuna delle due direzioni, e la direzione peggiore e'
+   * bocciare una giornata finita: l'utente non capisce perche' e smette di
+   * fidarsi del controllo.
+   */
+  const mondo = (seed: string) =>
+    withOfficialScores(generateWorld({ seed, teams: 8, matchday: 5 }), DEFAULT_RULESET);
+
+  const osserva = (w: ReturnType<typeof mondo>) =>
+    osservazioneDaGiornata(w.serieA.players, w.snapshot.lineups, {
+      fetchedAt: '2026-01-06T08:00:00.000Z', contentHash: 'x',
+    });
+
+  it('una giornata completa passa, su ogni seed', () => {
+    for (const seed of ['a', 'b', 'c', 'd', 'e', 'f']) {
+      const o = osserva(mondo(seed));
+      expect(o.squadreSenzaVoto).toEqual([]);
+      expect(valuta([o], POLITICA_LETTURA_SINGOLA).ready).toBe(true);
+    }
+  });
+
+  it('la quota di voti da sola NON basta a decidere', () => {
+    /**
+     * E' la misura che ha smontato la prima versione di questo controllo: su
+     * giornate complete i titolari con voto stanno fra il 67% e l'81%, perche'
+     * i senza voto esistono e sono legittimi. Una soglia al 90% su quel numero
+     * boccerebbe giornate finite.
+     */
+    for (const seed of ['a', 'b', 'c', 'd', 'e']) {
+      const o = osserva(mondo(seed));
+      const quota = o.playersRated / o.playersExpected;
+      expect(quota).toBeLessThan(0.9);
+      expect(quota).toBeGreaterThan(0.5);
+    }
+  });
+
+  it('una giornata a meta’ viene fermata, e dice quali squadre mancano', () => {
+    const w = mondo('a');
+    const squadre = [...new Set(w.serieA.players.map((p) => p.serieATeam))].sort();
+    const nonGiocate = new Set(squadre.slice(0, Math.floor(squadre.length / 2)));
+
+    const o = osservazioneDaGiornata(
+      w.serieA.players.map((p) =>
+        nonGiocate.has(p.serieATeam) ? { ...p, vote: null, minutes: 0 } : p),
+      w.snapshot.lineups,
+      { fetchedAt: '2026-01-06T08:00:00.000Z', contentHash: 'x' },
+    );
+
+    const d = valuta([o], POLITICA_LETTURA_SINGOLA);
+    expect(d.ready).toBe(false);
+    expect(d.reason).toMatch(/partite ancora da giocare/);
+    expect(o.squadreSenzaVoto).toEqual([...nonGiocate].sort());
+  });
+
+  it('una sola squadra ferma la giornata: un rinvio non e’ una giornata finita', () => {
+    const w = mondo('b');
+    const una = [...new Set(w.serieA.players.map((p) => p.serieATeam))].sort()[0]!;
+    const o = osservazioneDaGiornata(
+      w.serieA.players.map((p) => (p.serieATeam === una ? { ...p, vote: null } : p)),
+      w.snapshot.lineups,
+      { fetchedAt: '2026-01-06T08:00:00.000Z', contentHash: 'x' },
+    );
+    expect(valuta([o], POLITICA_LETTURA_SINGOLA).ready).toBe(false);
+    expect(o.squadreSenzaVoto).toEqual([una]);
   });
 });
