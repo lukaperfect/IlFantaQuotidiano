@@ -85,6 +85,21 @@ async function init() {
     aggiorna();
   });
 
+  /**
+   * Segna che i listener sono agganciati.
+   *
+   * `init` aspetta `chrome.storage.local.get` PRIMA di agganciarli, quindi fra
+   * il caricamento della pagina e quel momento c'e' una finestra in cui i
+   * bottoni sono perfettamente cliccabili e non fanno niente. Un click che
+   * cade li' dentro si perde in silenzio — ed e' esattamente cosi' che la
+   * verifica e' morta in CI, dove la macchina e' piu' carica e la finestra
+   * piu' larga.
+   *
+   * Il segno serve alla verifica per aspettare il momento giusto invece di
+   * sperare, e serve a chiunque apra il popup per sapere se il suo script e'
+   * arrivato in fondo.
+   */
+  document.documentElement.dataset.pronto = 'si';
   aggiorna();
 }
 

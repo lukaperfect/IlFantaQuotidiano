@@ -121,6 +121,11 @@ async function main(): Promise<void> {
     const popup = await ctx.newPage();
     await popup.setViewportSize({ width: 320, height: 620 });
     await popup.goto(`chrome-extension://${idEstensione}/src/popup.html`);
+    // Il popup aggancia i listener DOPO aver letto la configurazione salvata:
+    // cliccare prima di quel momento significa cliccare un bottone inerte, e
+    // il click si perde senza lasciare traccia. Si aspetta il segno, non il
+    // caso.
+    await popup.locator('html[data-pronto="si"]').waitFor({ timeout: 15_000 });
     await popup.fill('#server', SERVER);
     await popup.fill('#chiave', chiave);
     await popup.click('#salva');
