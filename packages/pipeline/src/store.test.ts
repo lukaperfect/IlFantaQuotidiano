@@ -57,6 +57,7 @@ const implementazioni: { nome: string; salta: boolean; crea: () => Promise<Ambie
 
 const lega = (over: Record<string, unknown> = {}) => ({
   leagueId: 'lega-1', ownerId: 'acc-mario', publicSlug: 'slug-lungo-e-casuale',
+  relaySecret: null,
   leagueName: 'Lega Uno', ruleset: DEFAULT_RULESET, spice: 2 as const,
   createdAt: '2026-01-01T00:00:00.000Z', lastMatchday: null, ...over,
 });
@@ -79,7 +80,8 @@ for (const impl of implementazioni) {
     it('isola i proprietari', async () => {
       await env.league.saveConfig(lega());
       await env.league.saveConfig(lega({
-        leagueId: 'lega-2', ownerId: 'acc-giulia', publicSlug: 'slug-due', leagueName: 'Di Giulia',
+        leagueId: 'lega-2', ownerId: 'acc-giulia', publicSlug: 'slug-due',
+        relaySecret: null, leagueName: 'Di Giulia',
       }));
       expect((await env.league.listLeagues('acc-mario')).map((l) => l.leagueId)).toEqual(['lega-1']);
       expect(await env.league.getConfigForOwner('lega-2', 'acc-mario')).toBeNull();
@@ -99,6 +101,37 @@ for (const impl of implementazioni) {
       await env.league.saveConfig(lega({ publicSlug: 'slug-nuovo' }));
       expect(await env.league.getConfigBySlug('slug-lungo-e-casuale')).toBeNull();
       expect((await env.league.getConfigBySlug('slug-nuovo'))?.leagueId).toBe('lega-1');
+    });
+
+    it('la chiave dell’estensione nasce assente, si ruota e si revoca', async () => {
+      await env.league.saveConfig(lega());
+      // Una credenziale che esiste da prima che serva e' una credenziale in
+      // giro senza motivo: nasce nulla e non risolve niente.
+      expect(await env.league.getConfigByRelaySecret('')).toBeNull();
+      expect(await env.league.getConfigByRelaySecret('chiave-mai-emessa')).toBeNull();
+
+      await env.league.saveConfig(lega({ relaySecret: 'chiave-uno' }));
+      expect((await env.league.getConfigByRelaySecret('chiave-uno'))?.leagueId).toBe('lega-1');
+
+      // Ruotare deve TOGLIERE la vecchia: una chiave che continua a funzionare
+      // dopo la rotazione rende la rotazione una bugia, esattamente come per
+      // lo slug pubblico.
+      await env.league.saveConfig(lega({ relaySecret: 'chiave-due' }));
+      expect(await env.league.getConfigByRelaySecret('chiave-uno')).toBeNull();
+      expect((await env.league.getConfigByRelaySecret('chiave-due'))?.leagueId).toBe('lega-1');
+
+      // E revocare del tutto la spegne senza toccare il resto della lega.
+      await env.league.saveConfig(lega({ relaySecret: null }));
+      expect(await env.league.getConfigByRelaySecret('chiave-due')).toBeNull();
+      expect(await env.league.getConfigForOwner('lega-1', 'acc-mario')).not.toBeNull();
+    });
+
+    it('due leghe possono avere entrambe la chiave assente', async () => {
+      // Su Postgres l'unicita' e' un indice: se fosse ingenuo, la seconda lega
+      // senza chiave violerebbe il vincolo e non si potrebbe creare.
+      await env.league.saveConfig(lega());
+      await env.league.saveConfig(lega({ leagueId: 'lega-2', publicSlug: 'slug-due' }));
+      expect(await env.league.listLeagues('acc-mario')).toHaveLength(2);
     });
 
     it('conserva edizione e fact pack insieme', async () => {

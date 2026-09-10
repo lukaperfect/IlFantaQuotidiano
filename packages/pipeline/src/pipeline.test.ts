@@ -180,6 +180,7 @@ describe('degrado e revisione', () => {
 describe('configurazione della lega e isolamento tra proprietari', () => {
   const base = {
     leagueId: 'lega-test', ownerId: 'acc-mario', publicSlug: 'slug-mario-lungo',
+    relaySecret: null,
     leagueName: 'Lega Test', ruleset: R, spice: 2 as const,
     createdAt: '2026-01-01T00:00:00Z', lastMatchday: null,
   };
@@ -203,7 +204,7 @@ describe('configurazione della lega e isolamento tra proprietari', () => {
     await store.saveConfig(base);
     await store.saveConfig({
       ...base, leagueId: 'lega-altrui', ownerId: 'acc-giulia',
-      publicSlug: 'slug-giulia-lungo', leagueName: 'Lega di Giulia',
+      publicSlug: 'slug-giulia-lungo', relaySecret: null, leagueName: 'Lega di Giulia',
     });
 
     expect((await store.listLeagues('acc-mario')).map((l) => l.leagueId)).toEqual(['lega-test']);

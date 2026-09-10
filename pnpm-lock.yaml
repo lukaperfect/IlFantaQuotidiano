@@ -78,6 +78,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@fantacomics/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
       '@fantacomics/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -102,9 +105,16 @@ importers:
       '@fantacomics/scoring':
         specifier: workspace:*
         version: link:../../packages/scoring
+      pg:
+        specifier: ^8.13.1
+        version: 8.23.0
       playwright:
         specifier: ^1.49.0
         version: 1.63.0
+    devDependencies:
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.23.1
 
   packages/auth:
     dependencies:

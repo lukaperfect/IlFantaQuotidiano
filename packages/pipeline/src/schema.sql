@@ -42,6 +42,11 @@ create table if not exists leagues (
   created_at    timestamptz not null,
   last_matchday integer
 );
+-- La chiave dell'estensione: aggiunta dopo, quindi come ALTER, e nullabile
+-- perche' esiste solo dalle leghe che l'hanno chiesta in poi. L'unicita' e'
+-- del database: ruotarla libera la vecchia senza dipendere dal codice.
+alter table leagues add column if not exists relay_secret text;
+create unique index if not exists leagues_relay_secret_idx on leagues (relay_secret);
 create index if not exists leagues_owner_idx on leagues (owner_id);
 
 create table if not exists editions (

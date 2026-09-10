@@ -13,6 +13,11 @@
     "@fantacomics/llm": "workspace:*",
     "@fantacomics/render": "workspace:*",
     "@fantacomics/ingest": "workspace:*",
-    "playwright": "^1.49.0"
+    "playwright": "^1.49.0",
+    "@fantacomics/auth": "workspace:*",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.10"
   }
 }

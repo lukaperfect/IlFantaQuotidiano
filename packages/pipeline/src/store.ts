@@ -33,6 +33,18 @@ export type LeagueConfig = {
    * quando un link finisce dove non doveva.
    */
   publicSlug: string;
+  /**
+   * La chiave con cui l'estensione del browser parla di QUESTA lega.
+   *
+   * Separata dallo slug pubblico perche' concede un potere diverso: lo slug
+   * fa leggere il giornale, questa fa entrare dati. Un capability distinto per
+   * ogni potere significa che revocare la condivisione non spegne
+   * l'estensione, e togliere l'estensione non rompe i link gia' inviati.
+   *
+   * `null` finche' l'admin non la chiede: una credenziale che esiste da prima
+   * che serva e' una credenziale in giro senza motivo.
+   */
+  relaySecret: string | null;
   leagueName: string;
   ruleset: LeagueRuleset;
   spice: 1 | 2 | 3;
@@ -64,6 +76,13 @@ export interface LeagueStore {
   listLeagues(ownerId: string): Promise<LeagueConfig[]>;
   getConfigForOwner(leagueId: string, ownerId: string): Promise<LeagueConfig | null>;
   getConfigBySlug(publicSlug: string): Promise<LeagueConfig | null>;
+  /**
+   * Risolve la chiave dell'estensione. E' l'unico modo per cui il relay sa a
+   * quale lega appartiene cio' che riceve: senza, l'endpoint dovrebbe fidarsi
+   * di un identificatore scritto nel corpo della richiesta, che e' come dire
+   * che non c'e' autenticazione.
+   */
+  getConfigByRelaySecret(relaySecret: string): Promise<LeagueConfig | null>;
   saveConfig(config: LeagueConfig): Promise<void>;
   getEdition(leagueId: string, matchday: number): Promise<PublishedEdition | null>;
   listEditions(leagueId: string): Promise<number[]>;
@@ -162,6 +181,13 @@ export class FileLeagueStore implements LeagueStore {
     return leagueId ? this.readConfig(leagueId) : null;
   }
 
+  async getConfigByRelaySecret(relaySecret: string): Promise<LeagueConfig | null> {
+    if (relaySecret === '') return null;
+    const map = await this.readJson<Record<string, string>>(this.path('relay.json'), {});
+    const leagueId = map[relaySecret];
+    return leagueId ? this.readConfig(leagueId) : null;
+  }
+
   async saveConfig(config: LeagueConfig): Promise<void> {
     const precedente = await this.readConfig(config.leagueId);
     await this.writeJson(this.path('config', `${config.leagueId}.json`), config);
@@ -179,6 +205,15 @@ export class FileLeagueStore implements LeagueStore {
     }
     map[config.publicSlug] = config.leagueId;
     await this.writeJson(this.path('slugs.json'), map);
+
+    // Stessa regola per la chiave dell'estensione: ruotarla o revocarla deve
+    // togliere la vecchia, non solo aggiungere la nuova.
+    const relay = await this.readJson<Record<string, string>>(this.path('relay.json'), {});
+    if (precedente?.relaySecret && precedente.relaySecret !== config.relaySecret) {
+      delete relay[precedente.relaySecret];
+    }
+    if (config.relaySecret) relay[config.relaySecret] = config.leagueId;
+    await this.writeJson(this.path('relay.json'), relay);
   }
 
   async getEdition(leagueId: string, matchday: number): Promise<PublishedEdition | null> {
@@ -260,6 +295,10 @@ export class InMemoryLeagueStore implements LeagueStore {
   }
   async getConfigBySlug(publicSlug: string): Promise<LeagueConfig | null> {
     return [...this.configs.values()].find((c) => c.publicSlug === publicSlug) ?? null;
+  }
+  async getConfigByRelaySecret(relaySecret: string): Promise<LeagueConfig | null> {
+    if (relaySecret === '') return null;
+    return [...this.configs.values()].find((c) => c.relaySecret === relaySecret) ?? null;
   }
   async saveConfig(config: LeagueConfig): Promise<void> { this.configs.set(config.leagueId, config); }
   async getEdition(leagueId: string, matchday: number): Promise<PublishedEdition | null> {

@@ -9,6 +9,9 @@ import { evaluateReadiness, shouldDeliver, type Observation } from './readiness.
 import { detectDrift, describeShape, formatDriftReport } from './validation.js';
 import { resolvePath, applyMapping, parseEnvelope, mappingCoverage } from './collectors/extension-relay.js';
 import { AdapterError, AdapterRegistry } from './adapter.js';
+import { importFromRelay, recordsFromEnvelope, coperturaMinima } from './collectors/relay-import.js';
+import { PROFILO_PROVA } from './profiles.js';
+import { payloadPortaleDiProva } from './synthetic-portal.js';
 
 const R = DEFAULT_RULESET;
 
@@ -293,5 +296,93 @@ describe('registro degli adapter', () => {
     expect(registry.list()).toEqual(['test']);
     expect(registry.get('test').platform).toBe('test');
     expect(() => registry.get('altro')).toThrow(/Nessun adapter registrato/);
+  });
+});
+
+describe('due sorgenti, uno snapshot', () => {
+  /**
+   * LA PROPRIETA' CHE GIUSTIFICA L'ANTI-CORRUPTION LAYER.
+   *
+   * La stessa giornata, letta dall'estensione o esportata a mano in CSV, deve
+   * produrre lo stesso identico snapshot. Se le due vie divergono, tutto cio'
+   * che sta a valle — punteggi, fatti, giornale — dipende da quale sorgente e'
+   * stata usata, e "abbiamo un percorso di riserva" diventa una frase senza
+   * contenuto: il ripiego produrrebbe un prodotto diverso.
+   */
+  it('relay ed esportazione CSV producono lo stesso snapshot', () => {
+    let w = generateWorld({ seed: 'convergenza', teams: 8, matchday: 5 });
+    w = withOfficialScores(w, DEFAULT_RULESET);
+    const quando = '2026-01-06T08:00:00+01:00';
+
+    const csv = exportAll(w.serieA, w.snapshot);
+    const daFile = importFromFiles({
+      season: w.snapshot.season,
+      matchday: w.snapshot.matchday,
+      leagueId: w.snapshot.leagueId,
+      leagueName: w.snapshot.leagueName,
+      votiCsv: csv.votiCsv,
+      formazioniCsv: csv.formazioniCsv,
+      calendarioCsv: csv.calendarioCsv,
+      roseCsv: csv.roseCsv,
+      classificaCsv: csv.classificaCsv,
+      collectedAt: quando,
+    });
+
+    const envelope = parseEnvelope({
+      clientVersion: '1.0.0',
+      platform: PROFILO_PROVA.platform,
+      leagueExternalId: 'id-sulla-piattaforma',
+      matchday: w.snapshot.matchday,
+      capturedAt: quando,
+      payloads: payloadPortaleDiProva(w.serieA, w.snapshot),
+    });
+    const daRelay = importFromRelay(envelope, PROFILO_PROVA, {
+      leagueId: w.snapshot.leagueId,
+      leagueName: w.snapshot.leagueName,
+      season: w.snapshot.season,
+    });
+
+    // L'unica differenza legittima e' il collettore: dice da dove arriva il
+    // dato, ed e' un'informazione che si vuole conservare.
+    expect({ ...daRelay.snapshot, collector: 'file-import' }).toEqual(daFile.snapshot);
+    expect(daRelay.serieA.players).toEqual(daFile.serieA.players);
+  });
+
+  it('la copertura cade quando la piattaforma sposta un campo', () => {
+    const w = withOfficialScores(generateWorld({ seed: 'deriva', teams: 6, matchday: 3 }), DEFAULT_RULESET);
+    const payloads = payloadPortaleDiProva(w.serieA, w.snapshot);
+
+    // La piattaforma rinomina `voto` in `votoFinale`: e' la deriva tipica, e
+    // non produce un errore — produce numeri mancanti. Va vista come calo di
+    // copertura PRIMA di pubblicare, non come un giornale pieno di SV.
+    const voti = payloads.voti as { data: { giocatori: { stats: Record<string, unknown> }[] } };
+    for (const g of voti.data.giocatori) {
+      g.stats.votoFinale = g.stats.voto;
+      delete g.stats.voto;
+    }
+
+    const envelope = parseEnvelope({
+      clientVersion: '1.0.0', platform: PROFILO_PROVA.platform,
+      leagueExternalId: 'x', matchday: 3,
+      capturedAt: '2026-01-06T08:00:00+01:00', payloads,
+    });
+    const { copertura } = recordsFromEnvelope(envelope, PROFILO_PROVA);
+    const voto = copertura.find((c) => c.id === 'voti');
+    expect(voto?.ratio).toBe(0);
+    expect(voto?.campiMancanti.vote).toBe(voti.data.giocatori.length);
+    expect(coperturaMinima(copertura)).toBe(0);
+  });
+
+  it('un payload obbligatorio mancante si ferma e lo dice', () => {
+    const w = withOfficialScores(generateWorld({ seed: 'monco', teams: 6, matchday: 2 }), DEFAULT_RULESET);
+    const payloads = payloadPortaleDiProva(w.serieA, w.snapshot);
+    delete (payloads as Record<string, unknown>).formazioni;
+
+    const envelope = parseEnvelope({
+      clientVersion: '1.0.0', platform: PROFILO_PROVA.platform,
+      leagueExternalId: 'x', matchday: 2,
+      capturedAt: '2026-01-06T08:00:00+01:00', payloads,
+    });
+    expect(() => recordsFromEnvelope(envelope, PROFILO_PROVA)).toThrow(/formazioni/);
   });
 });

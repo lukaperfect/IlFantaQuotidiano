@@ -35,6 +35,8 @@ export const RelayEnvelopeSchema = z.object({
   platform: z.string().min(1),
   leagueExternalId: z.string().min(1),
   matchday: z.number().int().min(1).max(38),
+  /** Facoltativa: se manca la decide il server, che sa in che giorno vive. */
+  season: z.string().min(4).max(16).optional(),
   capturedAt: z.string().datetime({ offset: true }),
   /** I payload grezzi, così come la pagina li ha ricevuti. */
   payloads: z.record(z.string(), z.unknown()),

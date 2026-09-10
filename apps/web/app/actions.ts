@@ -152,6 +152,7 @@ export async function creaLegaDaFile(form: FormData): Promise<void> {
     leagueId,
     ownerId: account.accountId,
     publicSlug: esistente?.publicSlug ?? randomToken(18),
+    relaySecret: esistente?.relaySecret ?? null,
     leagueName, ruleset: DEFAULT_RULESET, spice,
     createdAt: esistente?.createdAt ?? new Date().toISOString(),
     lastMatchday: esistente?.lastMatchday ?? null,
@@ -182,6 +183,7 @@ export async function creaLegaDiProva(form: FormData): Promise<void> {
     leagueId,
     ownerId: account.accountId,
     publicSlug: randomToken(18),
+    relaySecret: null,
     leagueName, ruleset: DEFAULT_RULESET, spice,
     createdAt: new Date().toISOString(), lastMatchday: null,
   });
@@ -257,6 +259,37 @@ export async function salvaConfigurazione(
       messaggio: e instanceof Error ? `Regolamento non valido: ${e.message}` : 'Errore sconosciuto.',
     };
   }
+}
+
+/**
+ * Genera o ruota la chiave con cui l'estensione parla di QUESTA lega.
+ *
+ * Perche' non riusare lo slug pubblico: concede un potere diverso. Lo slug fa
+ * leggere il giornale, questa fa entrare dati. Tenerli distinti significa che
+ * revocare la condivisione non spegne l'estensione e togliere l'estensione non
+ * rompe i link gia' mandati nel gruppo.
+ */
+export async function generaChiaveEstensione(form: FormData): Promise<void> {
+  const account = await requireAccount();
+  const leagueId = String(form.get('leagueId') ?? '');
+  const config = await store.getConfigForOwner(leagueId, account.accountId);
+  if (!config) redirect('/');
+
+  await store.saveConfig({ ...config, relaySecret: randomToken(24) });
+  revalidatePath(`/lega/${leagueId}`);
+  redirect(`/lega/${leagueId}`);
+}
+
+/** Revoca la chiave: l'estensione smette di poter mandare dati per questa lega. */
+export async function revocaChiaveEstensione(form: FormData): Promise<void> {
+  const account = await requireAccount();
+  const leagueId = String(form.get('leagueId') ?? '');
+  const config = await store.getConfigForOwner(leagueId, account.accountId);
+  if (!config) redirect('/');
+
+  await store.saveConfig({ ...config, relaySecret: null });
+  revalidatePath(`/lega/${leagueId}`);
+  redirect(`/lega/${leagueId}`);
 }
 
 /** Rigenera lo slug pubblico: revoca ogni link condiviso in precedenza. */

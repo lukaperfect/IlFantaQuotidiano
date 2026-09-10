@@ -1,5 +1,6 @@
 import type {
-  LeagueTeam, LeagueWeekSnapshot, Lineup, LineupSlot, PlayerMatchStat, Role, SerieAMatchday,
+  CollectorKind, LeagueTeam, LeagueWeekSnapshot, Lineup, LineupSlot, PlayerMatchStat, Role,
+  SerieAMatchday,
 } from '@fantacomics/core';
 import { LeagueWeekSnapshotSchema, SerieAMatchdaySchema, stableHash } from '@fantacomics/core';
 import { parseCsvTable, num, optionalNum, int, bool } from '../csv.js';
@@ -45,26 +46,57 @@ function asRole(value: string, context: string): Role {
   return r;
 }
 
-export function importFromFiles(input: FileImportInput): {
+/**
+ * Un elenco di record piatti: e' la forma comune fra un CSV esportato a mano e
+ * un payload JSON mappato dall'estensione. Tenere qui il confine significa che
+ * le due sorgenti convergono sugli STESSI costruttori — non su due percorsi
+ * che si somigliano finche' qualcuno non li fa divergere in silenzio.
+ */
+export type Righe = Record<string, string>[];
+
+export type RecordImportInput = {
+  season: string;
+  matchday: number;
+  leagueId: string;
+  leagueName: string;
+  collector: CollectorKind;
+  /** Serve solo a rilevare che il contenuto e' cambiato, non a leggerlo. */
+  contentHash: string;
+  voti: Righe;
+  formazioni: Righe;
+  calendario: Righe;
+  rose?: Righe;
+  classifica?: Righe;
+  partiteSerieA?: Righe;
+  collectedAt?: string;
+};
+
+/**
+ * Il costruttore vero. `importFromFiles` e il relay dell'estensione ci
+ * arrivano entrambi: una giornata raccolta dall'estensione e la stessa
+ * giornata esportata in CSV producono lo stesso identico snapshot, e c'e' un
+ * test che lo verifica.
+ */
+export function importFromRecords(input: RecordImportInput): {
   serieA: SerieAMatchday;
   snapshot: LeagueWeekSnapshot;
 } {
-  const players = parsePlayers(input.votiCsv);
-  const matches = input.partiteSerieACsv ? parseMatches(input.partiteSerieACsv) : [];
+  const players = buildPlayers(input.voti);
+  const matches = input.partiteSerieA ? buildMatches(input.partiteSerieA) : [];
 
   const serieA = SerieAMatchdaySchema.parse({
     season: input.season,
     matchday: input.matchday,
     readiness: 'VOTI_DEFINITIVI',
-    contentHash: stableHash(input.votiCsv),
+    contentHash: input.contentHash,
     fetchedAt: input.collectedAt ?? new Date().toISOString(),
     matches,
     players,
   });
 
-  const { teams, lineups } = parseLineups(input.formazioniCsv, input.roseCsv);
-  const fixtures = parseFixtures(input.calendarioCsv);
-  const standingsBefore = input.classificaCsv ? parseStandings(input.classificaCsv) : [];
+  const { teams, lineups } = buildLineups(input.formazioni, input.rose);
+  const fixtures = buildFixtures(input.calendario);
+  const standingsBefore = input.classifica ? buildStandings(input.classifica) : [];
 
   const known = new Set(teams.map((t) => t.teamId));
   for (const f of fixtures) {
@@ -83,7 +115,7 @@ export function importFromFiles(input: FileImportInput): {
     leagueName: input.leagueName,
     season: input.season,
     matchday: input.matchday,
-    collector: 'file-import',
+    collector: input.collector,
     collectedAt: input.collectedAt ?? new Date().toISOString(),
     teams, lineups, fixtures, standingsBefore,
   });
@@ -91,8 +123,30 @@ export function importFromFiles(input: FileImportInput): {
   return { serieA, snapshot };
 }
 
-function parsePlayers(csv: string): PlayerMatchStat[] {
-  const { rows } = parseCsvTable(csv);
+/** La via dai CSV: converte in righe e passa al costruttore comune. */
+export function importFromFiles(input: FileImportInput): {
+  serieA: SerieAMatchday;
+  snapshot: LeagueWeekSnapshot;
+} {
+  const righe = (csv: string): Righe => parseCsvTable(csv).rows;
+  return importFromRecords({
+    season: input.season,
+    matchday: input.matchday,
+    leagueId: input.leagueId,
+    leagueName: input.leagueName,
+    collector: 'file-import',
+    contentHash: stableHash(input.votiCsv),
+    voti: righe(input.votiCsv),
+    formazioni: righe(input.formazioniCsv),
+    calendario: righe(input.calendarioCsv),
+    ...(input.roseCsv ? { rose: righe(input.roseCsv) } : {}),
+    ...(input.classificaCsv ? { classifica: righe(input.classificaCsv) } : {}),
+    ...(input.partiteSerieACsv ? { partiteSerieA: righe(input.partiteSerieACsv) } : {}),
+    ...(input.collectedAt ? { collectedAt: input.collectedAt } : {}),
+  });
+}
+
+function buildPlayers(rows: Righe): PlayerMatchStat[] {
   if (rows.length === 0) throw new AdapterError('Il file dei voti è vuoto.', 'parse', false);
 
   return rows.map((r, i) => {
@@ -119,8 +173,7 @@ function parsePlayers(csv: string): PlayerMatchStat[] {
   });
 }
 
-function parseMatches(csv: string) {
-  const { rows } = parseCsvTable(csv);
+function buildMatches(rows: Righe) {
   return rows.map((r) => ({
     homeTeam: r.homeTeam?.trim() ?? '',
     awayTeam: r.awayTeam?.trim() ?? '',
@@ -130,8 +183,7 @@ function parseMatches(csv: string) {
   })).filter((m) => m.homeTeam && m.awayTeam);
 }
 
-function parseLineups(csv: string, roseCsv?: string): { teams: LeagueTeam[]; lineups: Lineup[] } {
-  const { rows } = parseCsvTable(csv);
+function buildLineups(rows: Righe, roseRows?: Righe): { teams: LeagueTeam[]; lineups: Lineup[] } {
   if (rows.length === 0) throw new AdapterError('Il file delle formazioni è vuoto.', 'parse', false);
 
   type Acc = {
@@ -173,7 +225,7 @@ function parseLineups(csv: string, roseCsv?: string): { teams: LeagueTeam[]; lin
 
   const teams: LeagueTeam[] = [];
   const lineups: Lineup[] = [];
-  const rosters = roseCsv ? parseRosters(roseCsv) : new Map<string, LeagueTeam['roster']>();
+  const rosters = roseRows ? buildRosters(roseRows) : new Map<string, LeagueTeam['roster']>();
 
   for (const [teamId, acc] of byTeam) {
     if (acc.starters.length !== 11) {
@@ -205,8 +257,7 @@ function parseLineups(csv: string, roseCsv?: string): { teams: LeagueTeam[]; lin
   return { teams, lineups };
 }
 
-function parseRosters(csv: string): Map<string, LeagueTeam['roster']> {
-  const { rows } = parseCsvTable(csv);
+function buildRosters(rows: Righe): Map<string, LeagueTeam['roster']> {
   const out = new Map<string, LeagueTeam['roster']>();
   for (const r of rows) {
     const teamId = r.teamId?.trim();
@@ -219,8 +270,7 @@ function parseRosters(csv: string): Map<string, LeagueTeam['roster']> {
   return out;
 }
 
-function parseFixtures(csv: string) {
-  const { rows } = parseCsvTable(csv);
+function buildFixtures(rows: Righe) {
   if (rows.length === 0) throw new AdapterError('Il calendario è vuoto.', 'parse', false);
   return rows.map((r) => ({
     homeTeamId: r.homeTeamId?.trim() ?? '',
@@ -232,8 +282,7 @@ function parseFixtures(csv: string) {
   }));
 }
 
-function parseStandings(csv: string) {
-  const { rows } = parseCsvTable(csv);
+function buildStandings(rows: Righe) {
   return rows.map((r, i) => ({
     teamId: r.teamId?.trim() ?? '',
     position: int(r.position, i + 1),

@@ -2,7 +2,9 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { store } from '@/lib/store';
 import { requireAccount } from '@/lib/session';
-import { rigeneraLink } from '@/app/actions';
+import {
+  rigeneraLink, generaChiaveEstensione, revocaChiaveEstensione,
+} from '@/app/actions';
 import { ConfigForm } from './config-form';
 
 export const dynamic = 'force-dynamic';
@@ -81,6 +83,41 @@ export default async function Lega({ params }: { params: Promise<{ id: string }>
           <button className="btn" type="submit">Rigenera il link (revoca il precedente)</button>
         </form>
       </div>
+
+      <h2>Estensione del browser</h2>
+      <p className="muted small">
+        L’estensione legge i dati che la pagina della piattaforma ti ha già
+        mostrato e li manda qui. Nessuna password viene custodita e il traffico
+        resta il tuo, con i tuoi volumi: non è accesso automatizzato. Questa
+        chiave dice all’estensione di quale lega sta parlando — è l’unica cosa
+        che devi incollarci dentro.
+      </p>
+      {config.relaySecret ? (
+        <div className="share-box">
+          <code>{config.relaySecret}</code>
+          <div className="row">
+            <form action={generaChiaveEstensione}>
+              <input type="hidden" name="leagueId" value={config.leagueId} />
+              <button className="btn" type="submit">Ruota (revoca la precedente)</button>
+            </form>
+            <form action={revocaChiaveEstensione}>
+              <input type="hidden" name="leagueId" value={config.leagueId} />
+              <button className="btn" type="submit">Revoca</button>
+            </form>
+          </div>
+        </div>
+      ) : (
+        <div className="share-box">
+          <span className="muted small">
+            Nessuna chiave attiva. Una credenziale che esiste prima di servire è
+            una credenziale in giro senza motivo.
+          </span>
+          <form action={generaChiaveEstensione}>
+            <input type="hidden" name="leagueId" value={config.leagueId} />
+            <button className="btn btn--primary" type="submit">Genera la chiave</button>
+          </form>
+        </div>
+      )}
 
       <h2>Regolamento</h2>
       <p className="muted small">

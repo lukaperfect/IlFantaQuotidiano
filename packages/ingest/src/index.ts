@@ -6,3 +6,6 @@ export * from './validation.js';
 export * from './collectors/file-import.js';
 export * from './collectors/file-export.js';
 export * from './collectors/extension-relay.js';
+export * from './collectors/relay-import.js';
+export * from './profiles.js';
+export * from './synthetic-portal.js';

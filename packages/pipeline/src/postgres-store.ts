@@ -41,6 +41,7 @@ export class PostgresLeagueStore implements LeagueStore {
       leagueId: row.league_id as string,
       ownerId: row.owner_id as string,
       publicSlug: row.public_slug as string,
+      relaySecret: (row.relay_secret as string | null) ?? null,
       leagueName: row.league_name as string,
       ruleset: row.ruleset as LeagueRuleset,
       spice: Number(row.spice) as 1 | 2 | 3,
@@ -72,20 +73,34 @@ export class PostgresLeagueStore implements LeagueStore {
     return rows[0] ? this.toConfig(rows[0]) : null;
   }
 
+  async getConfigByRelaySecret(relaySecret: string): Promise<LeagueConfig | null> {
+    // La stringa vuota non e' una chiave: senza questo controllo una lega con
+    // `relay_secret` nullo non verrebbe comunque trovata, ma tanto vale non
+    // mandare la domanda al database.
+    if (relaySecret === '') return null;
+    const { rows } = await this.pool.query(
+      'select * from leagues where relay_secret = $1', [relaySecret],
+    );
+    return rows[0] ? this.toConfig(rows[0]) : null;
+  }
+
   async saveConfig(config: LeagueConfig): Promise<void> {
     await this.pool.query(
       `insert into leagues
-         (league_id, owner_id, public_slug, league_name, ruleset, spice, created_at, last_matchday)
-       values ($1,$2,$3,$4,$5,$6,$7,$8)
+         (league_id, owner_id, public_slug, relay_secret, league_name, ruleset, spice,
+          created_at, last_matchday)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
        on conflict (league_id) do update set
          owner_id = excluded.owner_id,
          public_slug = excluded.public_slug,
+         relay_secret = excluded.relay_secret,
          league_name = excluded.league_name,
          ruleset = excluded.ruleset,
          spice = excluded.spice,
          last_matchday = excluded.last_matchday`,
       [
-        config.leagueId, config.ownerId, config.publicSlug, config.leagueName,
+        config.leagueId, config.ownerId, config.publicSlug, config.relaySecret,
+        config.leagueName,
         JSON.stringify(config.ruleset), config.spice, config.createdAt, config.lastMatchday,
       ],
     );
