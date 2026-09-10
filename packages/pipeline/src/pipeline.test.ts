@@ -36,7 +36,9 @@ describe('pipeline end-to-end', () => {
   it('traccia ogni step con esito e durata', async () => {
     const out = await run(12, new InMemoryLeagueStore());
     const steps = out.trace.map((t) => t.step);
-    expect(steps).toEqual(['compute', 'load-state', 'facts', 'pack', 'plan', 'generate', 'render', 'persist']);
+    expect(steps).toEqual([
+      'compute', 'load-state', 'past-text', 'facts', 'pack', 'plan', 'generate', 'render', 'persist',
+    ]);
     expect(out.trace.every((t) => t.status === 'ok')).toBe(true);
     expect(out.trace.find((t) => t.step === 'compute')?.note).toMatch(/Riconciliazione OK/);
   });

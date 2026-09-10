@@ -4,9 +4,10 @@ import type {
 import { computeLeagueMatchday, type LeagueMatchdayResult } from '@fantacomics/scoring';
 import { generateFacts, buildFactPack, buildHistoryEntry, type FactEngineOutput } from '@fantacomics/facts';
 import {
-  planEdition, updateMemory, PERSONAS, type EditorialPlan, type SpiceLevel,
+  planEdition, updateMemory, buildPastCorpus, PERSONAS,
+  type EditorialPlan, type SpiceLevel,
 } from '@fantacomics/editorial';
-import { generateEdition, TemplateDriver, type LlmDriver } from '@fantacomics/llm';
+import { generateEdition, TemplateDriver, textOfEdition, type LlmDriver } from '@fantacomics/llm';
 import { renderWebPage, renderPrintPage, renderCardSvg, cardsOf } from '@fantacomics/render';
 import type { LeagueStore } from './store.js';
 
@@ -39,6 +40,8 @@ export type PipelineInput = {
   targetArticles?: number;
   publishedAt?: string;
   batch?: boolean;
+  /** Quante edizioni passate confrontare per l'anti-ripetizione. */
+  repetitionLookback?: number;
 };
 
 export type PipelineOutput = {
@@ -97,13 +100,34 @@ export async function runMatchdayPipeline(input: PipelineInput): Promise<Pipelin
     ]),
   );
 
-  // 3. Fatti deterministici.
+  /**
+   * 3. Il testo delle edizioni recenti.
+   *
+   * Il cooldown su fatti e format impedisce di raccontare le stesse cose;
+   * questo impedisce di raccontarle con le stesse parole. Senza, il giornale
+   * si ripete pur cambiando format — ed e' cosi' che smette di essere letto.
+   */
+  const lookback = input.repetitionLookback ?? 3;
+  const pastCorpus = await timed('past-text', async () => {
+    const matchdays = (await input.store.listEditions(leagueId))
+      .filter((n) => n !== input.snapshot.matchday)
+      .slice(0, lookback);
+    const testi: string[] = [];
+    for (const n of matchdays) {
+      const past = await input.store.getEdition(leagueId, n);
+      if (past) testi.push(textOfEdition(past.edition));
+    }
+    return buildPastCorpus(testi);
+  });
+  trace[trace.length - 1]!.note = `${pastCorpus.size} n-grammi da ${lookback} edizioni`;
+
+  // 4. Fatti deterministici.
   const facts = await timed('facts', () => generateFacts(result, { history, corpus }));
   trace[trace.length - 1]!.note = `${facts.facts.length} fatti`;
 
   const pack = await timed('pack', () => buildFactPack(result, facts));
 
-  // 4. Piano editoriale: cosa si racconta, con quale format e quale voce.
+  // 5. Piano editoriale: cosa si racconta, con quale format e quale voce.
   const plan = await timed('plan', () => planEdition({
     facts: facts.facts,
     teamIds: input.snapshot.teams.map((t) => t.teamId),
@@ -115,7 +139,7 @@ export async function runMatchdayPipeline(input: PipelineInput): Promise<Pipelin
   }));
   trace[trace.length - 1]!.note = `${plan.articles.length} pezzi, ${plan.warnings.length} avvisi`;
 
-  // 5. Generazione, con verifica di ogni cifra e ripiego garantito.
+  // 6. Generazione, con verifica di ogni cifra e ripiego garantito.
   const generated = await timed('generate', () => generateEdition({
     plan, pack,
     teamNames: new Map(input.snapshot.teams.map((t) => [t.teamId, t.teamName])),
@@ -124,13 +148,16 @@ export async function runMatchdayPipeline(input: PipelineInput): Promise<Pipelin
     spice: input.spice ?? 2,
     rulesetVersion: input.rules.version,
     degraded: result.degraded,
+    pastCorpus,
     ...(input.publishedAt ? { publishedAt: input.publishedAt } : {}),
     ...(input.batch !== undefined ? { batch: input.batch } : {}),
   }));
   const ripieghi = generated.outcomes.filter((o) => o.usedFallback).length;
-  trace[trace.length - 1]!.note = `confidenza ${generated.confidence}, ${ripieghi} ripieghi`;
+  const ripetuti = generated.outcomes.filter((o) => o.repetition.ripetuto).length;
+  trace[trace.length - 1]!.note =
+    `confidenza ${generated.confidence}, ${ripieghi} ripieghi, ${ripetuti} pezzi ripetitivi`;
 
-  // 6. Rendering: una sorgente, tre uscite.
+  // 7. Rendering: una sorgente, tre uscite.
   const rendered = await timed('render', () => {
     const cards = cardsOf(generated.edition);
     return {
@@ -144,7 +171,7 @@ export async function runMatchdayPipeline(input: PipelineInput): Promise<Pipelin
     };
   });
 
-  // 7. Persistenza. Va DOPO il rendering: se il rendering fallisce, la memoria
+  // 8. Persistenza. Va DOPO il rendering: se il rendering fallisce, la memoria
   //    non avanza e rieseguire la giornata riparte da uno stato pulito.
   await timed('persist', async () => {
     await input.store.appendHistory(leagueId, buildHistoryEntry(result, facts));

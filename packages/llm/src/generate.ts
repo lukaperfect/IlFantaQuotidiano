@@ -2,10 +2,12 @@ import type { Article, Edition, FactPack, NarrativeFact } from '@fantacomics/cor
 import { EditionSchema } from '@fantacomics/core';
 import type { EditorialPlan } from '@fantacomics/editorial';
 import { FACT_ENGINE_VERSION } from '@fantacomics/facts';
+import { checkRepetition, type RepetitionReport } from '@fantacomics/editorial';
 import { PROMPT_VERSION } from './system-prompt.js';
 import { FORMAT_BLOCK_KINDS } from './schema.js';
 import { TemplateDriver } from './template-driver.js';
 import { allowedNumbersFor, allowedNumbersForPack, checkGrounding, textOfBlocks, type GroundingReport } from './grounding.js';
+import { shingles } from '@fantacomics/editorial';
 import { totalCost, type CostBreakdown } from './cost.js';
 import type { ArticleDraft, LlmDriver, SpiceLevel, Usage } from './driver.js';
 
@@ -21,6 +23,12 @@ export type GenerateOptions = {
   degraded: boolean;
   publishedAt?: string;
   batch?: boolean;
+  /**
+   * Gli n-grammi già usati nelle edizioni recenti della stessa lega.
+   * Senza, il giornale può ripetersi con parole identiche pur cambiando
+   * format — che è il modo più veloce di smettere di essere letto.
+   */
+  pastCorpus?: ReadonlySet<string>;
 };
 
 export type ArticleOutcome = {
@@ -29,6 +37,7 @@ export type ArticleOutcome = {
   attempts: number;
   usedFallback: boolean;
   grounding: GroundingReport;
+  repetition: RepetitionReport;
   error?: string;
 };
 
@@ -50,17 +59,32 @@ function allowedFor(pack: FactPack, facts: readonly NarrativeFact[], formatId: s
   return allowed;
 }
 
-function correctionFor(report: GroundingReport): string {
-  const bad = report.violations
+function correctionFor(grounding: GroundingReport, repetition: RepetitionReport): string {
+  const parti: string[] = [];
+
+  const bad = grounding.violations
     .filter((v) => v.severity === 'high')
     .map((v) => `"${v.raw}" in «${v.context}»`)
     .slice(0, 6);
-  return [
-    'Il pezzo precedente conteneva cifre che NON compaiono nei fatti forniti:',
-    ...bad.map((b) => `- ${b}`),
-    'Riscrivi il pezzo usando esclusivamente i numeri presenti nei fatti.',
-    'Se una battuta richiede un numero che non hai, cambia battuta.',
-  ].join('\n');
+  if (bad.length > 0) {
+    parti.push(
+      'Il pezzo precedente conteneva cifre che NON compaiono nei fatti forniti:',
+      ...bad.map((b) => `- ${b}`),
+      'Riscrivi usando esclusivamente i numeri presenti nei fatti.',
+      'Se una battuta richiede un numero che non hai, cambia battuta.',
+    );
+  }
+
+  if (repetition.ripetuto) {
+    parti.push(
+      `Il pezzo precedente ricalcava edizioni passate della stessa lega (${Math.round(repetition.containment * 100)}% di frasi già usate).`,
+      'Queste sequenze sono già state stampate e non vanno riusate:',
+      ...repetition.frasiRipetute.map((f) => `- «${f}»`),
+      'Riscrivi cambiando angolo e costruzione delle frasi, non solo qualche parola.',
+    );
+  }
+
+  return parti.join('\n');
 }
 
 /**
@@ -79,6 +103,12 @@ export async function generateEdition(opts: GenerateOptions): Promise<GenerateRe
   const articles: Article[] = [];
   const outcomes: ArticleOutcome[] = [];
   const usages: (Usage | null)[] = [];
+  /**
+   * Copia mutabile che cresce con i pezzi accettati in questa stessa edizione.
+   * Parte SEMPRE, anche senza edizioni passate: un primo numero con otto pezzi
+   * identici fra loro e' grave quanto un numero che ricalca il precedente.
+   */
+  const corpus = new Set(opts.pastCorpus ?? []);
 
   for (const planned of plan.articles) {
     const allowed = allowedFor(pack, planned.facts, planned.format.id);
@@ -100,6 +130,7 @@ export async function generateEdition(opts: GenerateOptions): Promise<GenerateRe
     let usedFallback = false;
     let draft: ArticleDraft | null = null;
     let report: GroundingReport = { ok: true, checked: 0, violations: [] };
+    let ripetizione: RepetitionReport = { ripetuto: false, containment: 0, frasiRipetute: [] };
     let error: string | undefined;
 
     for (const correction of [undefined, 'retry'] as const) {
@@ -107,26 +138,43 @@ export async function generateEdition(opts: GenerateOptions): Promise<GenerateRe
       try {
         const req = correction === undefined
           ? baseRequest
-          : { ...baseRequest, correction: correctionFor(report) };
+          : { ...baseRequest, correction: correctionFor(report, ripetizione) };
         const candidate = await driver.article(req);
-        const check = checkGrounding(textOfBlocks(candidate.blocks), allowed);
+        const testo = textOfBlocks(candidate.blocks);
         draft = candidate;
-        report = check;
-        if (check.ok) break;
+        report = checkGrounding(testo, allowed);
+        ripetizione = checkRepetition(testo, corpus);
+        if (report.ok && !ripetizione.ripetuto) break;
       } catch (e) {
         error = e instanceof Error ? e.message : String(e);
         draft = null;
       }
     }
 
+    /**
+     * Il ripiego scatta solo per il grounding, non per la ripetizione: un
+     * pezzo che si ripete resta pubblicabile, uno con un numero inventato no.
+     * La ripetizione abbassa la confidenza e finisce nella revisione, che e'
+     * la risposta proporzionata a un difetto di stile.
+     */
     if (!draft || !report.ok) {
       usedFallback = true;
       draft = await fallback.article(baseRequest);
-      report = checkGrounding(textOfBlocks(draft.blocks), allowed);
+      const testo = textOfBlocks(draft.blocks);
+      report = checkGrounding(testo, allowed);
+      ripetizione = checkRepetition(testo, corpus);
     }
 
+    // Il pezzo appena accettato entra nel corpus: due pezzi della STESSA
+    // edizione non devono somigliarsi fra loro.
+    for (const s of shingles(textOfBlocks(draft.blocks))) corpus.add(s);
+
     usages.push(draft.usage);
-    outcomes.push({ slot: planned.slot, formatId: planned.format.id, attempts, usedFallback, grounding: report, error });
+    outcomes.push({
+      slot: planned.slot, formatId: planned.format.id, attempts, usedFallback,
+      grounding: report, repetition: ripetizione,
+      ...(error ? { error } : {}),
+    });
     articles.push({
       slot: planned.slot,
       format: planned.format.id,
@@ -229,6 +277,11 @@ export function computeConfidence(args: {
     (n, o) => n + o.grounding.violations.filter((v) => v.severity === 'low').length, 0,
   );
   score -= Math.min(0.15, lowViolations * 0.02);
+
+  // Un giornale che si ripete non è sbagliato, è noioso: pesa meno di un
+  // ripiego ma abbastanza da finire in revisione se succede spesso.
+  const ripetuti = args.outcomes.filter((o) => o.repetition.ripetuto).length;
+  score -= Math.min(0.25, 0.12 * ripetuti);
   score -= Math.min(0.15, args.plan.warnings.length * 0.05);
 
   const uncovered = args.plan.coverage.filter((c) => c.appearances === 0).length;

@@ -150,3 +150,8 @@ export function textOfBlocks(blocks: readonly unknown[]): string {
   walk(blocks);
   return parts.join('\n');
 }
+
+/** Tutta la prosa di un'edizione, per il confronto anti-ripetizione. */
+export function textOfEdition(edition: { articles: readonly { blocks: readonly unknown[] }[] }): string {
+  return edition.articles.map((a) => textOfBlocks(a.blocks)).join('\n');
+}

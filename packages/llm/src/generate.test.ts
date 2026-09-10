@@ -2,13 +2,14 @@ import { describe, it, expect } from 'vitest';
 import { DEFAULT_RULESET, EditionSchema } from '@fantacomics/core';
 import { computeLeagueMatchday } from '@fantacomics/scoring';
 import { generateFacts, buildFactPack } from '@fantacomics/facts';
-import { planEdition, emptyMemory } from '@fantacomics/editorial';
+import { planEdition, emptyMemory, buildPastCorpus } from '@fantacomics/editorial';
 import { generateWorld, withOfficialScores, nudgeTeamToScore } from '@fantacomics/ingest';
-import { generateEdition, type GenerateOptions } from './generate.js';
+import { generateEdition, computeConfidence, type GenerateOptions, type ArticleOutcome } from './generate.js';
 import { TemplateDriver } from './template-driver.js';
 import { SYSTEM_PROMPT, PROMPT_VERSION } from './system-prompt.js';
 import { buildMessageParams, MODELS, DEFAULT_ROUTING } from './anthropic-driver.js';
 import { articleJsonSchema } from './schema.js';
+import { textOfBlocks } from './grounding.js';
 import type { ArticleDraft, ArticleRequest, CardRequest, CardsDraft, LlmDriver } from './driver.js';
 import { costOf, totalCost, seasonProjection } from './cost.js';
 
@@ -257,5 +258,155 @@ describe('modalità degradata — qualità del testo', () => {
     for (const card of res.edition.personalCards) {
       expect(card.stat.label).not.toMatch(/[a-z][A-Z]/); // niente camelCase grezzo
     }
+  });
+});
+
+/**
+ * Driver che varia davvero fra i pezzi ma è identico a se stesso di settimana
+ * in settimana. Le frasi devono condividere poco fra loro, altrimenti e' la
+ * guardia stessa a coglierle — cosa che, in effetti, fa correttamente.
+ */
+class Vario implements LlmDriver {
+  readonly name = 'vario';
+  private i = 0;
+  private readonly corpi = [
+    'Nello spogliatoio il presidente ha smesso di rispondere al telefono, e i compagni giurano di aver sentito rumore di valigie dietro la porta chiusa dell ufficio.',
+    'La difesa ha camminato per novanta minuti come un gruppo di turisti distratti, fermandosi ad ammirare il panorama ogni volta che passava un avversario.',
+    'Il modulo scelto sabato mattina resta un mistero che nemmeno gli storici della lega sapranno spiegare, e forse e meglio non indagare oltre.',
+    'Chi ha guardato la panchina domenica sera ha visto uomini fortissimi seduti a osservare, immobili, come statue di un museo dimenticato in periferia.',
+    'Le pagelle raccontano una giornata di ordinaria follia, dove ogni scelta sbagliata ne ha generata un altra peggiore in una catena senza fine.',
+    'Il mercato di riparazione bussa alla porta con insistenza, ma dentro casa nessuno sembra avere intenzione di alzarsi dal divano ad aprire.',
+    'Gli attaccanti hanno tirato verso la porta con la convinzione di chi compila un modulo per posta, sperando che qualcuno prima o poi lo legga.',
+    'La classifica adesso pesa come un cappotto bagnato, e la prossima giornata arriva con la delicatezza di un citofono alle sei del mattino.',
+  ];
+
+  async article(req: ArticleRequest): Promise<ArticleDraft> {
+    const corpo = this.corpi[this.i % this.corpi.length] as string;
+    this.i++;
+    return {
+      blocks: [
+        { kind: 'headline', text: `Titolo di ${req.formatId}`.slice(0, 62) },
+        { kind: 'body', paragraphs: [corpo] },
+      ],
+      usage: null, producedBy: this.name,
+    };
+  }
+
+  async personalCards(req: CardRequest): Promise<CardsDraft> {
+    return {
+      cards: req.cards.map((c) => ({
+        teamId: c.teamId, headline: 'Card personale', body: c.fact.plain,
+        statLabel: 'punti', statValue: '0',
+      })),
+      usage: null, producedBy: this.name,
+    };
+  }
+}
+
+/** Driver che scrive sempre lo stesso pezzo, qualunque cosa riceva. */
+class Ripetitivo implements LlmDriver {
+  readonly name = 'ripetitivo';
+  private readonly testo =
+    'La stessa identica frase stampata ogni settimana senza cambiare una virgola, ' +
+    'con lo stesso angolo e la stessa costruzione, come se il giornale fosse fermo ' +
+    'alla giornata precedente e nessuno se ne fosse accorto in redazione.';
+
+  async article(): Promise<ArticleDraft> {
+    return {
+      blocks: [
+        { kind: 'headline', text: 'Sempre lo stesso titolo' },
+        { kind: 'body', paragraphs: [this.testo] },
+      ],
+      usage: null,
+      producedBy: this.name,
+    };
+  }
+
+  async personalCards(req: CardRequest): Promise<CardsDraft> {
+    return {
+      cards: req.cards.map((c) => ({
+        teamId: c.teamId, headline: 'Sempre uguale', body: c.fact.plain,
+        statLabel: 'punti', statValue: '0',
+      })),
+      usage: null, producedBy: this.name,
+    };
+  }
+}
+
+describe('guardia anti-ripetizione nel giornale', () => {
+  it('non segnala nulla senza edizioni passate', async () => {
+    const res = await generateEdition(options());
+    expect(res.outcomes.every((o) => o.repetition.ripetuto === false)).toBe(true);
+  });
+
+  it('rileva un pezzo che ricalca le edizioni passate', async () => {
+    const passato = buildPastCorpus([
+      'La stessa identica frase stampata ogni settimana senza cambiare una virgola, ' +
+      'con lo stesso angolo e la stessa costruzione, come se il giornale fosse fermo ' +
+      'alla giornata precedente e nessuno se ne fosse accorto in redazione.',
+    ]);
+    const res = await generateEdition(options({ driver: new Ripetitivo(), pastCorpus: passato }));
+
+    const ripetuti = res.outcomes.filter((o) => o.repetition.ripetuto);
+    expect(ripetuti.length).toBeGreaterThan(0);
+    expect(ripetuti[0]?.repetition.containment).toBeGreaterThan(0.25);
+    expect(ripetuti[0]?.repetition.frasiRipetute.length).toBeGreaterThan(0);
+    // Riprova una volta prima di rassegnarsi.
+    expect(ripetuti[0]?.attempts).toBe(2);
+  });
+
+  it('un pezzo ripetitivo NON fa scattare il ripiego: è noioso, non sbagliato', async () => {
+    const passato = buildPastCorpus([
+      'La stessa identica frase stampata ogni settimana senza cambiare una virgola, ' +
+      'con lo stesso angolo e la stessa costruzione, come se il giornale fosse fermo ' +
+      'alla giornata precedente e nessuno se ne fosse accorto in redazione.',
+    ]);
+    const res = await generateEdition(options({ driver: new Ripetitivo(), pastCorpus: passato }));
+    const ripetuto = res.outcomes.find((o) => o.repetition.ripetuto);
+    expect(ripetuto?.usedFallback).toBe(false);
+    expect(ripetuto?.grounding.ok).toBe(true);
+  });
+
+  it('la ripetizione abbassa la confidenza e manda in revisione', () => {
+    // Confronto diretto sulla formula: un driver che si ripete internamente
+    // non offre un termine di paragone pulito, perche' la ripetizione la
+    // colpisce comunque.
+    const outcome = (ripetuto: boolean): ArticleOutcome => ({
+      slot: 'interno', formatId: 'f', attempts: 1, usedFallback: false,
+      grounding: { ok: true, checked: 0, violations: [] },
+      repetition: { ripetuto, containment: ripetuto ? 0.8 : 0, frasiRipetute: [] },
+    });
+    const plan = { articles: [], personalCards: [], coverage: [], warnings: [], seed: 's' } as never;
+
+    const pulito = computeConfidence({ outcomes: [outcome(false), outcome(false)], plan, degraded: false });
+    const misto = computeConfidence({ outcomes: [outcome(true), outcome(false)], plan, degraded: false });
+    const tutto = computeConfidence({ outcomes: [outcome(true), outcome(true)], plan, degraded: false });
+
+    expect(pulito).toBe(1);
+    expect(misto).toBeLessThan(pulito);
+    expect(tutto).toBeLessThan(misto);
+  });
+
+  it('lo stesso testo la settimana dopo viene colto', async () => {
+    // Lo scenario vero: pezzi diversi fra loro, ma identici a quelli
+    // dell'edizione precedente della stessa lega.
+    const prima = await generateEdition(options({ driver: new Vario() }));
+    expect(prima.outcomes.every((o) => !o.repetition.ripetuto)).toBe(true);
+
+    const corpus = buildPastCorpus(
+      prima.edition.articles.map((a) => textOfBlocks(a.blocks)),
+    );
+    const dopo = await generateEdition(options({ driver: new Vario(), pastCorpus: corpus }));
+
+    expect(dopo.outcomes.filter((o) => o.repetition.ripetuto).length).toBeGreaterThan(0);
+    expect(dopo.confidence).toBeLessThan(prima.confidence);
+  });
+
+  it('due pezzi della stessa edizione non possono somigliarsi fra loro', async () => {
+    // Il corpus cresce con i pezzi accettati: il secondo pezzo identico al
+    // primo viene colto anche senza alcuna edizione passata.
+    const res = await generateEdition(options({ driver: new Ripetitivo() }));
+    const dopoIlPrimo = res.outcomes.slice(1);
+    expect(dopoIlPrimo.some((o) => o.repetition.ripetuto)).toBe(true);
   });
 });

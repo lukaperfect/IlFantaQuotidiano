@@ -33,7 +33,7 @@ Da qui tre inversioni che governano tutto il codice:
 
 ```bash
 pnpm install
-pnpm test                                   # 203 test (190 senza database)
+pnpm test                                   # 220 test (207 senza database)
 pnpm demo -- --out out --giornate 6         # una stagione simulata end-to-end
 pnpm demo -- --out out --giornate 4 --assets   # aggiunge PDF e PNG reali (serve Chromium)
 
@@ -128,6 +128,14 @@ si vede solo dalla fattura.
 turni infrasettimanali e rinvii. Il cron decide *quando consegnare*; una
 macchina a stati decide *quando è pronto* — partite chiuse, voti sopra soglia e
 stabili su letture consecutive.
+
+**Il giornale non può ripetersi.** Il cooldown su tipi di fatto e format
+impedisce di raccontare le stesse cose; una guardia sugli n-grammi impedisce di
+raccontarle con le stesse parole. Ogni pezzo viene confrontato con le edizioni
+recenti della lega *e* con i pezzi già accettati nella stessa edizione: se
+ricalca, si riscrive citando al modello le frasi bruciate. Un pezzo ripetitivo
+non fa scattare il ripiego — è noioso, non sbagliato — ma abbassa la confidenza
+e finisce in revisione.
 
 **Copertura garantita.** Se un presidente non appare mai nel giornale smette di
 leggerlo. Il selector ha un vincolo duro: nessuno resta invisibile due giornate
