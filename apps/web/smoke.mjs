@@ -164,6 +164,45 @@ const anteprimaEstraneo = await lettore.page.request.get(`${base}/lega/${legaId}
 ok('chi ha solo il link pubblico non puo’ aprire l’anteprima',
    anteprimaEstraneo.status() === 404, `status ${anteprimaEstraneo.status()}`);
 
+/**
+ * 5-quater. L'interruttore di emergenza si aziona davvero.
+ *
+ * Il percorso da file e' cio' che tiene in piedi il prodotto se la piattaforma
+ * chiude gli accessi. Ma il modulo chiedeva cinque CSV senza dire quali
+ * colonne servissero: l'unico modo di scoprirlo era leggere il codice, e un
+ * interruttore che non sai azionare non e' un interruttore.
+ *
+ * Qui si scaricano i modelli e si rimettono dentro dal modulo vero. Se
+ * l'esportatore e l'importatore divergessero, questo passo lo direbbe subito.
+ */
+const modelli = {};
+for (const nome of ['voti', 'formazioni', 'calendario', 'rose', 'classifica']) {
+  const r = await mario.page.request.get(`${base}/modelli/${nome}.csv`);
+  ok(`modello ${nome}.csv scaricabile`, r.status() === 200, `status ${r.status()}`);
+  modelli[nome] = await r.text();
+}
+
+await mario.page.goto(`${base}/lega/nuova`, { waitUntil: 'domcontentloaded' });
+// Le colonne sono anche a schermo: non si deve indovinare niente.
+const colonne = await mario.page.locator('.colonne').first().innerText();
+ok('le colonne attese sono scritte in pagina', colonne.includes('playerId'), colonne.slice(0, 60));
+
+const formFile = mario.page.locator('form').filter({ hasText: 'Importa e genera' });
+await formFile.locator('input[name="leagueName"]').fill('Lega da File');
+for (const [nome, testo] of Object.entries(modelli)) {
+  await formFile.locator(`input[name="${nome}"]`).setInputFiles({
+    name: `${nome}.csv`, mimeType: 'text/csv', buffer: Buffer.from(testo, 'utf8'),
+  });
+}
+await formFile.locator('button:has-text("Importa e genera")').click();
+await mario.page.waitForSelector('h2:has-text("Edizioni")', { timeout: 120000 });
+const pezziDaFile = await mario.page.locator('.card-list li').count();
+ok('una lega nata dai soli modelli produce un giornale', pezziDaFile >= 1,
+   `${pezziDaFile} edizioni`);
+
+await mario.page.goto(legaUrl, { waitUntil: 'domcontentloaded' });
+await mario.page.locator('.share-box code').waitFor({ state: 'visible', timeout: 20000 });
+
 // 6. Rigenerare lo slug revoca il link precedente
 await mario.page.goto(legaUrl, { waitUntil: 'domcontentloaded' });
 await mario.page.locator('.share-box code').waitFor({ state: 'visible', timeout: 20000 });

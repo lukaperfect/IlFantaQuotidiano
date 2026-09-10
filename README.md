@@ -257,6 +257,16 @@ test lo dimostra: stessa giornata, stesso snapshot. Non è eleganza fine a sé
 stessa — è ciò che rende vera la frase «abbiamo un percorso di riserva». Se le
 due vie divergessero, il ripiego produrrebbe un prodotto diverso.
 
+**L'interruttore di emergenza si deve poter azionare.** Il percorso da CSV è
+ciò che tiene in piedi il prodotto se la piattaforma chiude gli accessi. Ma il
+modulo chiedeva cinque file senza dire una parola su quali colonne servissero:
+l'unico modo di scoprirlo era leggere il codice, e un interruttore che non sai
+azionare non è un interruttore. Ogni file ha ora un modello scaricabile e le
+colonne scritte in pagina — **generati dallo stesso esportatore** che un test di
+round-trip lega all'importatore, quindi non possono divergere da ciò che
+l'importatore accetta davvero. Il test end-to-end scarica i modelli e li
+rimette dentro dal modulo vero: se le due parti divergessero, lo direbbe subito.
+
 **Estetica solo tipografica.** Nessuna foto di calciatori: non è gusto ma
 rischio: i diritti sulle immagini di Serie A bloccano la monetizzazione al primo
 tentativo.

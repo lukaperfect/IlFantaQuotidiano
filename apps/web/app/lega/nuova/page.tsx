@@ -1,11 +1,15 @@
 import Link from 'next/link';
 import { creaLegaDaFile, creaLegaDiProva } from '@/app/actions';
 import { requireAccount } from '@/lib/session';
+import { intestazioni } from '@/lib/modelli';
 
 export const dynamic = 'force-dynamic';
 
 export default async function NuovaLega() {
   await requireAccount();
+  // Le intestazioni escono dallo stesso esportatore dei modelli: cio' che si
+  // legge in pagina e' cio' che l'importatore accetta, per costruzione.
+  const teste = intestazioni();
   return (
     <main className="wrap">
       <header className="top">
@@ -72,19 +76,38 @@ export default async function NuovaLega() {
             </label>
           </div>
 
+          <p className="muted small">
+            Non devi indovinare le colonne: ogni file ha un modello scaricabile,
+            generato dallo stesso codice che poi lo rilegge. Aprilo, sostituisci
+            le righe con le tue e ricaricalo.
+          </p>
+
           <fieldset>
             <legend>File obbligatori</legend>
-            <label>voti.csv <input name="voti" type="file" accept=".csv,text/csv" required /></label>
-            <label>formazioni.csv <input name="formazioni" type="file" accept=".csv,text/csv" required /></label>
-            <label>calendario.csv <input name="calendario" type="file" accept=".csv,text/csv" required /></label>
+            {(['voti', 'formazioni', 'calendario'] as const).map((nome) => (
+              <label key={nome}>
+                {nome}.csv{' '}
+                <a className="hint" href={`/modelli/${nome}.csv`} download>scarica il modello</a>
+                <code className="colonne">{teste[nome]}</code>
+                <input name={nome} type="file" accept=".csv,text/csv" required />
+              </label>
+            ))}
           </fieldset>
 
           <fieldset>
             <legend>Facoltativi — sbloccano altri fatti</legend>
-            <label>rose.csv <span className="hint">sblocca il flop d’asta</span>
-              <input name="rose" type="file" accept=".csv,text/csv" /></label>
-            <label>classifica.csv <span className="hint">sblocca sorpassi e nuovo leader</span>
-              <input name="classifica" type="file" accept=".csv,text/csv" /></label>
+            <label>
+              rose.csv <span className="hint">sblocca il flop d’asta</span>{' '}
+              <a className="hint" href="/modelli/rose.csv" download>scarica il modello</a>
+              <code className="colonne">{teste.rose}</code>
+              <input name="rose" type="file" accept=".csv,text/csv" />
+            </label>
+            <label>
+              classifica.csv <span className="hint">sblocca sorpassi e nuovo leader</span>{' '}
+              <a className="hint" href="/modelli/classifica.csv" download>scarica il modello</a>
+              <code className="colonne">{teste.classifica}</code>
+              <input name="classifica" type="file" accept=".csv,text/csv" />
+            </label>
           </fieldset>
 
           <div><button className="btn" type="submit">Importa e genera</button></div>
