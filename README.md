@@ -3,10 +3,11 @@
 Genera automaticamente un giornale sportivo satirico personalizzato per ogni
 lega di fantacalcio, a partire dai dati ufficiali della giornata.
 
-> **Stato**: prodotto funzionante end-to-end. Un admin può collegare una lega,
-> generare le edizioni e leggere il giornale dall'app web. Manca l'adapter
-> verso una piattaforma reale, la persistenza su database e la consegna
-> automatica: vedi [Cosa manca](#cosa-manca).
+> **Stato**: prodotto funzionante end-to-end, con account e isolamento fra
+> proprietari. Un admin accede, collega una lega, genera le edizioni e
+> condivide il giornale con un link revocabile. Manca l'adapter verso una
+> piattaforma reale, la persistenza su database e la consegna automatica:
+> vedi [Cosa manca](#cosa-manca).
 
 ## La tesi architetturale
 
@@ -32,14 +33,25 @@ Da qui tre inversioni che governano tutto il codice:
 
 ```bash
 pnpm install
-pnpm test                                   # 151 test
+pnpm test                                   # 184 test
 pnpm demo -- --out out --giornate 6         # una stagione simulata end-to-end
 pnpm demo -- --out out --giornate 4 --assets   # aggiunge PDF e PNG reali (serve Chromium)
 
 # L'app web
 pnpm --filter @fantacomics/web build
+FANTACOMICS_SECRET="una-stringa-di-almeno-32-caratteri-davvero" \
+FANTACOMICS_MAIL_LOG=./posta.log \
 pnpm --filter @fantacomics/web start        # http://localhost:3000
 ```
+
+L'accesso è senza password: si inserisce l'email e arriva un link valido
+quindici minuti, utilizzabile una volta sola. In sviluppo il link finisce in
+`FANTACOMICS_MAIL_LOG` (o sul log se non è impostata) invece di essere spedito.
+
+`FANTACOMICS_SECRET` non ha un valore di ripiego in produzione: senza, l'app
+**si rifiuta di partire**. Un default che funziona anche in produzione è la
+vulnerabilità classica — nessuno se ne accorge finché qualcuno non forgia una
+sessione.
 
 Nell'app: **Collega una lega → Genera la lega di prova** crea tre giornate con
 dati realistici e porta direttamente al giornale. Serve a vedere il prodotto
@@ -64,6 +76,7 @@ driver template.
 | `llm` | Prefisso congelato, grounding, routing, ripiego | L'unico punto in cui il sistema non è deterministico |
 | `render` | Un IR, tre uscite (web, broadsheet, card) | Puro: solo stringhe, niente browser |
 | `ingest` | Adapter, collector, macchina a stati, canary | La parte che sopravvive ai redesign altrui |
+| `auth` | Account, magic link monouso, sessione firmata HMAC | Sicurezza isolata e testabile a parte |
 | `pipeline` | Pipeline a sette step, store, configurazione lega | Condivisa tra worker e app web |
 | `apps/worker` | CLI della stagione, generazione PDF/PNG | Container long-running: Chromium non sta in serverless |
 | `apps/web` | Onboarding, archivio, lettura, card condivisibili | Il piano di controllo; il giornale resta un documento autonomo |
@@ -97,6 +110,19 @@ leggerlo. Il selector ha un vincolo duro: nessuno resta invisibile due giornate
 di fila, e ognuno ha diritto a un momento di gloria ogni tanto. Simmetrico è il
 tetto agli sfottò: un giornale che fa litigare la lega non viene rinnovato.
 
+**La proprietà non si può dimenticare.** Lo store non espone alcun metodo che
+restituisca una lega senza un proprietario o uno slug pubblico. Il controllo di
+accesso non dipende dal fatto che ogni pagina si ricordi di farlo: non esiste
+proprio il modo di leggere una lega altrui. Una lega di un altro e una lega
+inesistente rispondono identicamente, perché distinguerle direbbe a un estraneo
+quali id esistono.
+
+**Il giornale è pubblico, il link è revocabile.** La lettura senza account non è
+una svista: è il ciclo di condivisione che regge il prodotto. Ma l'indirizzo è
+uno slug lungo e casuale, separato dall'identità della lega e rigenerabile in un
+secondo. Per questo le risposte del giornale sono `no-store`: un segreto
+revocabile che resta in una cache per ore rende la revoca una bugia.
+
 **Estetica solo tipografica.** Nessuna foto di calciatori: non è gusto ma
 rischio: i diritti sulle immagini di Serie A bloccano la monetizzazione al primo
 tentativo.
@@ -108,10 +134,12 @@ Per andare in produzione servono, nell'ordine:
 1. **Un adapter reale** verso una piattaforma di fantacalcio, più l'estensione
    browser che ne è il collector consigliato. Il contratto, l'endpoint di relay
    (`POST /api/relay`) e il canary ci sono; manca la mappatura dei campi veri.
-2. **Persistenza vera**: `LeagueStore` è implementato su file; in produzione va
-   su Postgres, con pgvector per la memoria semantica anti-ripetizione.
-3. **Autenticazione e multi-tenant**: oggi chiunque raggiunga l'app vede tutte
-   le leghe. Serve prima di qualsiasi deploy pubblico.
+2. **Persistenza vera**: `LeagueStore` e `AuthStore` sono implementati su file;
+   in produzione vanno su Postgres, con pgvector per la memoria semantica
+   anti-ripetizione.
+3. **Un provider di posta vero**: il `Mailer` è un'interfaccia con
+   implementazioni su console e su file. Serve collegarci un servizio prima di
+   far accedere qualcuno che non sia sulla stessa macchina.
 4. **Consegna**: bot Telegram per l'automazione, PWA con Web Share API per la
    condivisione su WhatsApp (l'API di WhatsApp non scrive nei gruppi: qualsiasi
    piano che lo assuma è irrealizzabile).

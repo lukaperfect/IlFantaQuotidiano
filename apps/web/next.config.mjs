@@ -3,6 +3,7 @@ export default {
   // I pacchetti del monorepo sono TypeScript sorgente, non build: Next li
   // compila insieme all'app invece di pretendere un passo di build separato.
   transpilePackages: [
+    '@fantacomics/auth',
     '@fantacomics/core',
     '@fantacomics/scoring',
     '@fantacomics/facts',

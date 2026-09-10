@@ -1,9 +1,11 @@
 import Link from 'next/link';
 import { creaLegaDaFile, creaLegaDiProva } from '@/app/actions';
+import { requireAccount } from '@/lib/session';
 
 export const dynamic = 'force-dynamic';
 
-export default function NuovaLega() {
+export default async function NuovaLega() {
+  await requireAccount();
   return (
     <main className="wrap">
       <header className="top">

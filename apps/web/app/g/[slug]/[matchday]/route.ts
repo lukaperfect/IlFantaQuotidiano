@@ -15,21 +15,33 @@ const personaNames = Object.fromEntries(PERSONAS.map((p) => [p.id, p.name]));
  */
 export async function GET(
   _request: Request,
-  { params }: { params: Promise<{ id: string; matchday: string }> },
+  { params }: { params: Promise<{ slug: string; matchday: string }> },
 ): Promise<Response> {
-  const { id, matchday } = await params;
+  const { slug, matchday } = await params;
+  // L'indirizzo pubblico e' lo slug, non l'id interno: cosi' il link si revoca
+  // rigenerandolo, senza toccare la lega.
+  const config = await store.getConfigBySlug(slug);
+  if (!config) return new Response('Edizione non trovata', { status: 404 });
   const n = Number(matchday);
   if (!Number.isInteger(n)) return new Response('Giornata non valida', { status: 400 });
 
-  const published = await store.getEdition(id, n);
+  const published = await store.getEdition(config.leagueId, n);
   if (!published) return new Response('Edizione non trovata', { status: 404 });
 
   const html = renderWebPage(published.edition, published.pack, { personaNames });
   return new Response(html, {
     headers: {
       'content-type': 'text/html; charset=utf-8',
-      // Un'edizione pubblicata è immutabile: si può cachare a lungo.
-      'cache-control': 'public, max-age=300, stale-while-revalidate=86400',
+      /**
+       * Nessuna cache condivisa.
+       *
+       * L'indirizzo e' un segreto revocabile: se la risposta resta in una
+       * cache per minuti od ore, rigenerare lo slug NON revoca niente per
+       * chi quel link lo ha gia' aperto, e la funzione di revoca diventa
+       * una bugia. Il costo e' modesto — la pagina si compone da un JSON —
+       * e la correttezza qui vale molto piu' della banda risparmiata.
+       */
+      'cache-control': 'no-store',
     },
   });
 }

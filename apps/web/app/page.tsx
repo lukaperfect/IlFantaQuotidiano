@@ -1,11 +1,12 @@
 import Link from 'next/link';
 import { store } from '@/lib/store';
+import { requireAccount } from '@/lib/session';
 
-// Legge dal filesystem a ogni richiesta: non e' una pagina statica.
 export const dynamic = 'force-dynamic';
 
 export default async function Home() {
-  const leagues = await store.listLeagues();
+  const account = await requireAccount();
+  const leagues = await store.listLeagues(account.accountId);
 
   return (
     <main className="wrap">
@@ -47,6 +48,13 @@ export default async function Home() {
       <div className="row" style={{ marginTop: 28 }}>
         <Link className="btn btn--primary" href="/lega/nuova">Collega una lega</Link>
       </div>
+
+      <footer className="colophon-row">
+        <span className="muted small">{account.email}</span>
+        <form action="/esci" method="post">
+          <button className="btn" type="submit">Esci</button>
+        </form>
+      </footer>
     </main>
   );
 }

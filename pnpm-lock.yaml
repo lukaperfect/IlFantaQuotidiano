@@ -26,6 +26,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@fantacomics/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
       '@fantacomics/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -96,6 +99,12 @@ importers:
       playwright:
         specifier: ^1.49.0
         version: 1.63.0
+
+  packages/auth:
+    dependencies:
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
 
   packages/core:
     dependencies:
@@ -168,6 +177,9 @@ importers:
 
   packages/pipeline:
     dependencies:
+      '@fantacomics/auth':
+        specifier: workspace:*
+        version: link:../auth
       '@fantacomics/core':
         specifier: workspace:*
         version: link:../core

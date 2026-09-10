@@ -9,6 +9,7 @@
     "start": "next start -p 3000"
   },
   "dependencies": {
+    "@fantacomics/auth": "workspace:*",
     "@fantacomics/core": "workspace:*",
     "@fantacomics/editorial": "workspace:*",
     "@fantacomics/facts": "workspace:*",

@@ -6,7 +6,7 @@ import { ShareButton } from './share';
 
 export const dynamic = 'force-dynamic';
 
-type Props = { params: Promise<{ id: string; matchday: string; teamId: string }> };
+type Props = { params: Promise<{ slug: string; matchday: string; teamId: string }> };
 
 /**
  * L'anteprima del link È il prodotto.
@@ -14,12 +14,13 @@ type Props = { params: Promise<{ id: string; matchday: string; teamId: string }>
  * sfottò: e' quello che genera il click, non il titolo della pagina.
  */
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const { id, matchday, teamId } = await params;
-  const published = await store.getEdition(id, Number(matchday));
+  const { slug, matchday, teamId } = await params;
+  const config = await store.getConfigBySlug(slug);
+  const published = config ? await store.getEdition(config.leagueId, Number(matchday)) : null;
   const card = published?.edition.personalCards.find((c) => c.teamId === teamId);
   if (!card) return { title: 'FantaComics' };
 
-  const img = `/g/${id}/${matchday}/card/${teamId}/img?formato=og`;
+  const img = `/g/${slug}/${matchday}/card/${teamId}/img?formato=og`;
   return {
     title: `${card.teamName} · ${card.headline}`,
     description: card.body,
@@ -33,21 +34,24 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 }
 
 export default async function CardPage({ params }: Props) {
-  const { id, matchday, teamId } = await params;
-  const published = await store.getEdition(id, Number(matchday));
+  const { slug, matchday, teamId } = await params;
+  const config = await store.getConfigBySlug(slug);
+  if (!config) notFound();
+
+  const published = await store.getEdition(config.leagueId, Number(matchday));
   if (!published) notFound();
 
   const card = published.edition.personalCards.find((c) => c.teamId === teamId);
   if (!card) notFound();
 
   const others = published.edition.personalCards.filter((c) => c.teamId !== teamId);
-  const imgBase = `/g/${id}/${matchday}/card/${teamId}/img`;
+  const imgBase = `/g/${slug}/${matchday}/card/${teamId}/img`;
 
   return (
     <main className="wrap">
       <header className="top">
         <p className="kicker">
-          <Link href={`/g/${id}/${matchday}`}>Giornata {matchday}</Link> · Card personale
+          <Link href={`/g/${slug}/${matchday}`}>Giornata {matchday}</Link> · Card personale
         </p>
         <h1>{card.teamName}</h1>
       </header>
@@ -63,7 +67,7 @@ export default async function CardPage({ params }: Props) {
         <a className="btn" href={`${imgBase}?formato=story`} download={`${card.teamName}-story.svg`}>
           Formato storia
         </a>
-        <Link className="btn" href={`/g/${id}/${matchday}`}>Leggi il giornale</Link>
+        <Link className="btn" href={`/g/${slug}/${matchday}`}>Leggi il giornale</Link>
       </div>
 
       {others.length > 0 ? (
@@ -73,7 +77,7 @@ export default async function CardPage({ params }: Props) {
             {others.map((c) => (
               <li key={c.teamId} className="item">
                 <span><strong>{c.teamName}</strong></span>
-                <Link className="btn" href={`/g/${id}/${matchday}/card/${c.teamId}`}>Apri</Link>
+                <Link className="btn" href={`/g/${slug}/${matchday}/card/${c.teamId}`}>Apri</Link>
               </li>
             ))}
           </ul>

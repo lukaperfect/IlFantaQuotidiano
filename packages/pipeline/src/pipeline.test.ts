@@ -147,26 +147,59 @@ describe('degrado e revisione', () => {
   });
 });
 
-describe('configurazione della lega', () => {
+describe('configurazione della lega e isolamento tra proprietari', () => {
+  const base = {
+    leagueId: 'lega-test', ownerId: 'acc-mario', publicSlug: 'slug-mario-lungo',
+    leagueName: 'Lega Test', ruleset: R, spice: 2 as const,
+    createdAt: '2026-01-01T00:00:00Z', lastMatchday: null,
+  };
+
   it('registra la lega e tiene aggiornata l’ultima giornata pubblicata', async () => {
     const store = new InMemoryLeagueStore();
-    await store.saveConfig({
-      leagueId: 'lega-test', leagueName: 'Lega Test', ruleset: R, spice: 2,
-      createdAt: '2026-01-01T00:00:00Z', lastMatchday: null,
-    });
+    await store.saveConfig(base);
 
-    expect(await store.listLeagues()).toHaveLength(1);
+    expect(await store.listLeagues('acc-mario')).toHaveLength(1);
     await run(11, store);
     await run(12, store);
 
     expect(await store.listEditions('lega-test')).toEqual([12, 11]);
-    const config = await store.getConfig('lega-test');
+    const config = await store.getConfigForOwner('lega-test', 'acc-mario');
     expect(config?.leagueName).toBe('Lega Test');
+    expect(config?.lastMatchday).toBe(12);
+  });
+
+  it('non mostra a un proprietario le leghe di un altro', async () => {
+    const store = new InMemoryLeagueStore();
+    await store.saveConfig(base);
+    await store.saveConfig({
+      ...base, leagueId: 'lega-altrui', ownerId: 'acc-giulia',
+      publicSlug: 'slug-giulia-lungo', leagueName: 'Lega di Giulia',
+    });
+
+    expect((await store.listLeagues('acc-mario')).map((l) => l.leagueId)).toEqual(['lega-test']);
+    expect((await store.listLeagues('acc-giulia')).map((l) => l.leagueId)).toEqual(['lega-altrui']);
+    expect(await store.listLeagues('acc-estraneo')).toEqual([]);
+  });
+
+  it('una lega altrui risponde come una lega inesistente', async () => {
+    // Distinguere i due casi direbbe a un estraneo quali id esistono.
+    const store = new InMemoryLeagueStore();
+    await store.saveConfig(base);
+    expect(await store.getConfigForOwner('lega-test', 'acc-giulia')).toBeNull();
+    expect(await store.getConfigForOwner('lega-inesistente', 'acc-mario')).toBeNull();
+  });
+
+  it('lo slug pubblico apre la lega senza proprietario', async () => {
+    const store = new InMemoryLeagueStore();
+    await store.saveConfig(base);
+    const bySlug = await store.getConfigBySlug('slug-mario-lungo');
+    expect(bySlug?.leagueId).toBe('lega-test');
+    expect(await store.getConfigBySlug('slug-inventato')).toBeNull();
   });
 
   it('restituisce null per una lega sconosciuta invece di lanciare', async () => {
     const store = new InMemoryLeagueStore();
-    expect(await store.getConfig('inesistente')).toBeNull();
+    expect(await store.getConfigForOwner('inesistente', 'acc-x')).toBeNull();
     expect(await store.getEdition('inesistente', 1)).toBeNull();
     expect(await store.listEditions('inesistente')).toEqual([]);
   });

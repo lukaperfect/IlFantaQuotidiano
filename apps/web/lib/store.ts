@@ -1,10 +1,13 @@
-import { FileLeagueStore } from '@fantacomics/pipeline';
+import { FileLeagueStore, FileAuthStore } from '@fantacomics/pipeline';
 
 /**
- * Istanza unica dello store.
+ * Istanze uniche degli store.
  *
- * Su file per ora: la stessa interfaccia che in produzione implementa
- * Postgres. Il percorso e' configurabile perche' in un container effimero
- * i dati vanno su un volume, non nella working directory.
+ * Su file per ora: le stesse interfacce che in produzione implementa
+ * Postgres. Il percorso e' configurabile perche' in un container effimero i
+ * dati vanno su un volume, non nella working directory.
  */
-export const store = new FileLeagueStore(process.env.FANTACOMICS_DATA ?? '.data');
+const root = process.env.FANTACOMICS_DATA ?? '.data';
+
+export const store = new FileLeagueStore(root);
+export const authStore = new FileAuthStore(root);

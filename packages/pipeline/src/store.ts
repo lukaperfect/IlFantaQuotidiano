@@ -21,6 +21,18 @@ import { emptyMemory, type EditorialMemory } from '@fantacomics/editorial';
  */
 export type LeagueConfig = {
   leagueId: string;
+  /** Chi possiede la lega. Nessuna lega esiste senza un proprietario. */
+  ownerId: string;
+  /**
+   * Il segreto di condivisione, separato dall'id interno e revocabile.
+   *
+   * Il giornale DEVE essere leggibile senza login, altrimenti muore l'intero
+   * ciclo di condivisione che regge il prodotto. Ma usare l'id interno come
+   * indirizzo pubblico lega per sempre la lettura all'identita' della lega e
+   * non si puo' revocare. Uno slug lungo e casuale si rigenera in un secondo
+   * quando un link finisce dove non doveva.
+   */
+  publicSlug: string;
   leagueName: string;
   ruleset: LeagueRuleset;
   spice: 1 | 2 | 3;
@@ -43,8 +55,15 @@ export type PublishedEdition = {
 };
 
 export interface LeagueStore {
-  listLeagues(): Promise<LeagueConfig[]>;
-  getConfig(leagueId: string): Promise<LeagueConfig | null>;
+  /**
+   * Ogni lettura di configurazione passa da un proprietario o da uno slug.
+   * Non esiste un metodo che restituisca una lega senza uno dei due: e' cosi'
+   * che il controllo di proprieta' diventa impossibile da dimenticare, invece
+   * di dipendere dal fatto che ogni pagina si ricordi di farlo.
+   */
+  listLeagues(ownerId: string): Promise<LeagueConfig[]>;
+  getConfigForOwner(leagueId: string, ownerId: string): Promise<LeagueConfig | null>;
+  getConfigBySlug(publicSlug: string): Promise<LeagueConfig | null>;
   saveConfig(config: LeagueConfig): Promise<void>;
   getEdition(leagueId: string, matchday: number): Promise<PublishedEdition | null>;
   listEditions(leagueId: string): Promise<number[]>;
@@ -89,23 +108,48 @@ export class FileLeagueStore implements LeagueStore {
     });
   }
 
-  async listLeagues(): Promise<LeagueConfig[]> {
-    const index = await this.readJson<string[]>(this.path('leagues', '_index.json'), []);
-    const configs = await Promise.all(index.map((id) => this.getConfig(id)));
-    return configs.filter((c): c is LeagueConfig => c !== null)
-      .sort((a, b) => a.leagueName.localeCompare(b.leagueName));
-  }
-
-  async getConfig(leagueId: string): Promise<LeagueConfig | null> {
+  private async readConfig(leagueId: string): Promise<LeagueConfig | null> {
     return this.readJson<LeagueConfig | null>(this.path('config', `${leagueId}.json`), null);
   }
 
+  async listLeagues(ownerId: string): Promise<LeagueConfig[]> {
+    const index = await this.readJson<string[]>(this.path('leagues', '_index.json'), []);
+    const configs = await Promise.all(index.map((id) => this.readConfig(id)));
+    return configs
+      .filter((c): c is LeagueConfig => c !== null && c.ownerId === ownerId)
+      .sort((a, b) => a.leagueName.localeCompare(b.leagueName));
+  }
+
+  async getConfigForOwner(leagueId: string, ownerId: string): Promise<LeagueConfig | null> {
+    const config = await this.readConfig(leagueId);
+    // Lega inesistente e lega altrui rispondono allo stesso modo: distinguerle
+    // direbbe a un estraneo quali id esistono.
+    return config && config.ownerId === ownerId ? config : null;
+  }
+
+  async getConfigBySlug(publicSlug: string): Promise<LeagueConfig | null> {
+    const map = await this.readJson<Record<string, string>>(this.path('slugs.json'), {});
+    const leagueId = map[publicSlug];
+    return leagueId ? this.readConfig(leagueId) : null;
+  }
+
   async saveConfig(config: LeagueConfig): Promise<void> {
+    const precedente = await this.readConfig(config.leagueId);
     await this.writeJson(this.path('config', `${config.leagueId}.json`), config);
+
     const index = await this.readJson<string[]>(this.path('leagues', '_index.json'), []);
     if (!index.includes(config.leagueId)) {
       await this.writeJson(this.path('leagues', '_index.json'), [...index, config.leagueId]);
     }
+
+    const map = await this.readJson<Record<string, string>>(this.path('slugs.json'), {});
+    // Uno slug rigenerato deve smettere di funzionare: revocare significa
+    // togliere il vecchio, non solo aggiungere il nuovo.
+    if (precedente && precedente.publicSlug !== config.publicSlug) {
+      delete map[precedente.publicSlug];
+    }
+    map[config.publicSlug] = config.leagueId;
+    await this.writeJson(this.path('slugs.json'), map);
   }
 
   async getEdition(leagueId: string, matchday: number): Promise<PublishedEdition | null> {
@@ -153,7 +197,7 @@ export class FileLeagueStore implements LeagueStore {
       this.path('editions', leagueId, `g${edition.meta.matchday}.json`),
       { edition, pack } satisfies PublishedEdition,
     );
-    const config = await this.getConfig(leagueId);
+    const config = await this.readConfig(leagueId);
     if (config && (config.lastMatchday ?? 0) < edition.meta.matchday) {
       await this.saveConfig({ ...config, lastMatchday: edition.meta.matchday });
     }
@@ -178,9 +222,15 @@ export class InMemoryLeagueStore implements LeagueStore {
   private readonly configs = new Map<string, LeagueConfig>();
   private corpus: number[] = [];
 
-  async listLeagues(): Promise<LeagueConfig[]> { return [...this.configs.values()]; }
-  async getConfig(leagueId: string): Promise<LeagueConfig | null> {
-    return this.configs.get(leagueId) ?? null;
+  async listLeagues(ownerId: string): Promise<LeagueConfig[]> {
+    return [...this.configs.values()].filter((c) => c.ownerId === ownerId);
+  }
+  async getConfigForOwner(leagueId: string, ownerId: string): Promise<LeagueConfig | null> {
+    const c = this.configs.get(leagueId) ?? null;
+    return c && c.ownerId === ownerId ? c : null;
+  }
+  async getConfigBySlug(publicSlug: string): Promise<LeagueConfig | null> {
+    return [...this.configs.values()].find((c) => c.publicSlug === publicSlug) ?? null;
   }
   async saveConfig(config: LeagueConfig): Promise<void> { this.configs.set(config.leagueId, config); }
   async getEdition(leagueId: string, matchday: number): Promise<PublishedEdition | null> {
