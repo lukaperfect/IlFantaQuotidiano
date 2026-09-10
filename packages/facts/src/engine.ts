@@ -1,7 +1,7 @@
 import type { FactPack, NarrativeFact } from '@fantacomics/core';
 import { fmt, safeName } from '@fantacomics/core';
 import type { LeagueMatchdayResult } from '@fantacomics/scoring';
-import { buildContext, toFact, type FactContext, type LeagueHistory, type RarityCorpus } from './context.js';
+import { buildContext, toFact, type FactContext, type HistoricalMatchday, type LeagueHistory, type RarityCorpus } from './context.js';
 import { buildTeamViews, type TeamView } from './views.js';
 import { detectLuck } from './detectors/luck.js';
 import { detectThresholds } from './detectors/thresholds.js';
@@ -106,5 +106,44 @@ export function buildFactPack(
       teamName: ctx.teamName(r.teamId),
       points: String(r.points),
     })),
+  };
+}
+
+/**
+ * Riassunto della giornata da persistere.
+ * È ciò che rende possibili record, filotti, maledizioni e indice di
+ * ingiustizia cumulato: senza memoria, 38 output isolati; con memoria, una
+ * narrazione stagionale — che è la cosa che si rinnova l'anno dopo.
+ */
+export function buildHistoryEntry(
+  result: LeagueMatchdayResult,
+  output: FactEngineOutput,
+): HistoricalMatchday {
+  const points: Record<string, number> = {};
+  const results: Record<string, 'W' | 'D' | 'L'> = {};
+  const opponents: Record<string, string> = {};
+  const positions: Record<string, number> = {};
+
+  for (const [teamId, v] of output.views) {
+    points[teamId] = v.points;
+    results[teamId] = v.outcome;
+    opponents[teamId] = v.opponentId;
+  }
+
+  const before = new Map(result.snapshot.standingsBefore.map((r) => [r.teamId, r]));
+  const rows = [...output.views.values()].map((v) => {
+    const prev = before.get(v.teamId);
+    return {
+      teamId: v.teamId,
+      points: (prev?.points ?? 0) + v.actualLeaguePoints,
+      fantasy: (prev?.totalFantasyPoints ?? 0) + v.points,
+    };
+  }).sort((a, b) => b.points - a.points || b.fantasy - a.fantasy);
+  rows.forEach((r, i) => { positions[r.teamId] = i + 1; });
+
+  return {
+    matchday: result.snapshot.matchday,
+    points, results, opponents, positions,
+    luckDelta: output.luckDeltas,
   };
 }
