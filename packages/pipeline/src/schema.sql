@@ -1,0 +1,62 @@
+-- Schema di FantaComics.
+--
+-- Nota sulle chiavi esterne: `editions` e `league_state` NON referenziano
+-- `leagues`. La pipeline puo' produrre un'edizione senza che esista una riga
+-- di lega (e' il caso della CLI di simulazione), e le due implementazioni
+-- dello store condividono la stessa suite di contratto: un vincolo presente
+-- solo su Postgres le renderebbe non intercambiabili, che e' esattamente cio'
+-- che l'astrazione serve a garantire.
+
+create table if not exists accounts (
+  account_id  text primary key,
+  email       text not null unique,
+  created_at  timestamptz not null
+);
+
+create table if not exists magic_links (
+  token_hash  text primary key,
+  account_id  text not null references accounts(account_id) on delete cascade,
+  expires_at  bigint not null,
+  used_at     bigint
+);
+-- La potatura dei link scaduti scandisce su expires_at.
+create index if not exists magic_links_expires_at_idx on magic_links (expires_at);
+
+create table if not exists issue_throttle (
+  email      text primary key,
+  issued_at  bigint not null
+);
+
+create table if not exists leagues (
+  league_id     text primary key,
+  owner_id      text not null,
+  -- L'indirizzo pubblico e' unico e revocabile: rigenerarlo libera il vecchio.
+  public_slug   text not null unique,
+  league_name   text not null,
+  ruleset       jsonb not null,
+  spice         smallint not null,
+  created_at    timestamptz not null,
+  last_matchday integer
+);
+create index if not exists leagues_owner_idx on leagues (owner_id);
+
+create table if not exists editions (
+  league_id  text not null,
+  matchday   integer not null,
+  edition    jsonb not null,
+  -- Il pack viaggia con l'edizione: senza, il giornale non e' ricostruibile.
+  pack       jsonb not null,
+  primary key (league_id, matchday)
+);
+
+create table if not exists league_state (
+  league_id  text primary key,
+  memory     jsonb not null,
+  history    jsonb not null
+);
+
+create table if not exists corpus_points (
+  id      bigserial primary key,
+  points  double precision not null
+);
+create index if not exists corpus_points_value_idx on corpus_points (points);

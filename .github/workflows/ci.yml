@@ -15,10 +15,27 @@ jobs:
   verifica:
     name: Typecheck e test
     runs-on: ubuntu-latest
+
+    services:
+      # Senza un database vero i test dello store Postgres si saltano da soli
+      # e la meta' del contratto resta non verificata: qui gira davvero.
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
     env:
       # I test non usano il browser: solo la CLI lo fa, ed e' fuori dal
       # percorso di CI. Scaricare Chromium a ogni run sarebbe puro spreco.
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      FANTACOMICS_TEST_DB: postgres://postgres:postgres@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v4
 
@@ -40,6 +57,19 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      - name: Verifica che i test Postgres non siano stati saltati
+        # Un contratto meta' saltato in silenzio e' peggio di nessun contratto:
+        # sembra verde senza aver verificato niente.
+        run: |
+          pnpm vitest run packages/pipeline/src/store.test.ts --reporter=json --outputFile=/tmp/store.json > /dev/null
+          node -e "
+            const r = require('/tmp/store.json');
+            const saltati = r.numPendingTests ?? 0;
+            if (saltati > 0) { console.error('Test saltati: ' + saltati + ' — il database non era raggiungibile.'); process.exit(1); }
+            console.log('Nessun test saltato: contratto verificato su entrambe le implementazioni.');
+          "
+
 
       - name: Build dell'app web
         # `next build` e' l'unico controllo di tipi che copre apps/web: il

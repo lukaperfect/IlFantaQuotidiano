@@ -7,7 +7,7 @@ import { signingSecret, usingDevSecret } from '@fantacomics/auth';
  * tranquillamente e fallisce solo quando il primo utente prova ad accedere:
  * il momento peggiore per scoprirlo. Meglio non partire affatto.
  */
-export function register(): void {
+export async function register(): Promise<void> {
   // Vale solo sul runtime Node: l'edge non ha le stesse variabili.
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
 
@@ -23,6 +23,23 @@ export function register(): void {
     console.warn(
       '[FantaComics] FANTACOMICS_URL non impostata: i magic link e le immagini ' +
       'di anteprima useranno http://localhost:3000.',
+    );
+  }
+
+  /**
+   * Lo schema si applica all'avvio, una volta sola, e non alla prima
+   * richiesta: se il database non e' raggiungibile o la migrazione fallisce,
+   * e' meglio non partire che servire errori a caso.
+   */
+  const { pool, usingPostgres } = await import('@/lib/store');
+  if (usingPostgres && pool) {
+    const { migrate } = await import('@fantacomics/pipeline');
+    await migrate(pool);
+    console.log('[FantaComics] Persistenza su Postgres, schema applicato.');
+  } else {
+    console.warn(
+      '[FantaComics] Persistenza su file: adatta allo sviluppo, non a un ' +
+      'container effimero. Imposta DATABASE_URL per usare Postgres.',
     );
   }
 }

@@ -3,11 +3,11 @@
 Genera automaticamente un giornale sportivo satirico personalizzato per ogni
 lega di fantacalcio, a partire dai dati ufficiali della giornata.
 
-> **Stato**: prodotto funzionante end-to-end, con account e isolamento fra
-> proprietari. Un admin accede, collega una lega, genera le edizioni e
-> condivide il giornale con un link revocabile. Manca l'adapter verso una
-> piattaforma reale, la persistenza su database e la consegna automatica:
-> vedi [Cosa manca](#cosa-manca).
+> **Stato**: prodotto funzionante end-to-end, con account, isolamento fra
+> proprietari e persistenza su Postgres. Un admin accede, collega una lega,
+> genera le edizioni e condivide il giornale con un link revocabile. Manca
+> l'adapter verso una piattaforma reale e la consegna automatica: vedi
+> [Cosa manca](#cosa-manca).
 
 ## La tesi architetturale
 
@@ -33,7 +33,7 @@ Da qui tre inversioni che governano tutto il codice:
 
 ```bash
 pnpm install
-pnpm test                                   # 184 test
+pnpm test                                   # 203 test (190 senza database)
 pnpm demo -- --out out --giornate 6         # una stagione simulata end-to-end
 pnpm demo -- --out out --giornate 4 --assets   # aggiunge PDF e PNG reali (serve Chromium)
 
@@ -52,6 +52,30 @@ quindici minuti, utilizzabile una volta sola. In sviluppo il link finisce in
 **si rifiuta di partire**. Un default che funziona anche in produzione è la
 vulnerabilità classica — nessuno se ne accorge finché qualcuno non forgia una
 sessione.
+
+### Persistenza
+
+Senza `DATABASE_URL` i dati vanno su file, il che va bene per lo sviluppo e
+male per un container effimero. Con `DATABASE_URL` si va su Postgres e lo
+schema viene applicato all'avvio:
+
+```bash
+DATABASE_URL=postgres://utente@host:5432/fantacomics \
+FANTACOMICS_SECRET=... pnpm --filter @fantacomics/web start
+```
+
+Il passaggio è una variabile d'ambiente e non un rifacimento, perché le due
+implementazioni condividono una **suite di contratto**: le stesse asserzioni
+girano su entrambe, e se divergono il test lo dice subito. Per eseguirla anche
+sul database:
+
+```bash
+FANTACOMICS_TEST_DB=postgres://utente@host:5432/postgres pnpm test
+```
+
+Senza quella variabile i test dello store Postgres si saltano da soli. In CI un
+passo dedicato **fallisce se qualcosa è stato saltato**: un contratto metà
+verificato in silenzio è peggio di nessun contratto, perché sembra verde.
 
 Nell'app: **Collega una lega → Genera la lega di prova** crea tre giornate con
 dati realistici e porta direttamente al giornale. Serve a vedere il prodotto
@@ -134,18 +158,17 @@ Per andare in produzione servono, nell'ordine:
 1. **Un adapter reale** verso una piattaforma di fantacalcio, più l'estensione
    browser che ne è il collector consigliato. Il contratto, l'endpoint di relay
    (`POST /api/relay`) e il canary ci sono; manca la mappatura dei campi veri.
-2. **Persistenza vera**: `LeagueStore` e `AuthStore` sono implementati su file;
-   in produzione vanno su Postgres, con pgvector per la memoria semantica
-   anti-ripetizione.
-3. **Un provider di posta vero**: il `Mailer` è un'interfaccia con
+2. **Un provider di posta vero**: il `Mailer` è un'interfaccia con
    implementazioni su console e su file. Serve collegarci un servizio prima di
    far accedere qualcuno che non sia sulla stessa macchina.
-4. **Consegna**: bot Telegram per l'automazione, PWA con Web Share API per la
+3. **Consegna**: bot Telegram per l'automazione, PWA con Web Share API per la
    condivisione su WhatsApp (l'API di WhatsApp non scrive nei gruppi: qualsiasi
    piano che lo assuma è irrealizzabile).
-5. **Fonte xG** con licenza commerciale verificata.
-6. **Revisione umana al 100%** per le prime settimane: è così che si costruisce
+4. **Fonte xG** con licenza commerciale verificata.
+5. **Revisione umana al 100%** per le prime settimane: è così che si costruisce
    il dataset di stile, non un ripiego.
+6. **pgvector** per la memoria semantica anti-ripetizione: oggi il cooldown è
+   per tipo di fatto e per format, non per similarità del testo generato.
 7. **Il driver Anthropic contro l'API vera**: il codice c'è e l'assemblaggio
    della richiesta è testato, ma finora ha girato solo il driver template.
 

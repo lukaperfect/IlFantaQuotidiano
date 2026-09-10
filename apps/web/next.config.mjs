@@ -15,6 +15,10 @@ export default {
   ],
   eslint: { ignoreDuringBuilds: true },
 
+  // `pg` usa binding e require dinamici: va lasciato fuori dal bundle del
+  // server, altrimenti il build lo spezza in modi poco diagnosticabili.
+  serverExternalPackages: ['pg'],
+
   webpack(config) {
     /**
      * I sorgenti importano con estensione `.js` come richiede ESM su Node,
