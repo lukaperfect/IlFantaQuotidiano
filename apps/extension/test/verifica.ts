@@ -50,10 +50,44 @@ const store: LeagueStore = pool
   ? new PostgresLeagueStore(pool)
   : new FileLeagueStore(process.env.FANTACOMICS_DATA ?? '.data');
 
-/** Il service worker MV3 puo' non essersi ancora avviato quando il contesto e' pronto. */
+/**
+ * Il service worker MV3 puo' non essersi ancora avviato quando il contesto e'
+ * pronto, quindi si aspetta. Ma se non arriva mai, la causa quasi certa e' una
+ * sola e vale la pena dirla invece di lasciare un timeout muto: vedi il
+ * commento su `chromiumCompleto` qui sotto.
+ */
 async function serviceWorker(ctx: BrowserContext): Promise<Worker> {
   const esistente = ctx.serviceWorkers()[0];
-  return esistente ?? ctx.waitForEvent('serviceworker', { timeout: 20_000 });
+  if (esistente) return esistente;
+  try {
+    return await ctx.waitForEvent('serviceworker', { timeout: 20_000 });
+  } catch {
+    throw new Error(
+      'Il service worker dell’estensione non si e’ mai avviato. Quasi sempre ' +
+      'significa che Chromium e’ stato lanciato nella variante "headless shell", ' +
+      'che le estensioni non le carica proprio. Serve il build completo: ' +
+      'CHROMIUM_PATH verso il binario, oppure il canale "chromium".',
+    );
+  }
+}
+
+/**
+ * QUALE CHROMIUM.
+ *
+ * Non e' un dettaglio di configurazione: `chromium` senza altro, in headless,
+ * si risolve nella *headless shell*, un build ridotto che NON carica
+ * estensioni. Il service worker non parte mai e il test muore su un timeout
+ * che non dice niente — che e' esattamente come questa verifica ha fallito la
+ * prima volta in CI, mentre in locale passava perche' li' il percorso del
+ * build completo era esplicito.
+ *
+ * `channel: 'chromium'` chiede il build completo, che in headless moderno le
+ * estensioni le carica.
+ */
+function chromiumCompleto(): { executablePath: string } | { channel: string } {
+  return process.env.CHROMIUM_PATH
+    ? { executablePath: process.env.CHROMIUM_PATH }
+    : { channel: 'chromium' };
 }
 
 async function main(): Promise<void> {
@@ -69,7 +103,7 @@ async function main(): Promise<void> {
   const profilo = await mkdtemp(join(tmpdir(), 'fc-ext-'));
   const ctx = await chromium.launchPersistentContext(profilo, {
     headless: true,
-    ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
+    ...chromiumCompleto(),
     args: [
       `--disable-extensions-except=${ESTENSIONE}`,
       `--load-extension=${ESTENSIONE}`,
