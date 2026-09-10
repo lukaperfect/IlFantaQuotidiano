@@ -123,7 +123,10 @@ jobs:
       FANTACOMICS_SECRET: chiave-di-prova-lunga-abbastanza-per-la-ci-000
       FANTACOMICS_MAIL_LOG: /tmp/posta.jsonl
       FANTACOMICS_URL: http://localhost:3000
-      NODE_ENV: production
+      # NIENTE `NODE_ENV: production` a livello di job: farebbe installare a
+      # pnpm le sole dipendenze di produzione, e tsx, vitest e playwright
+      # sparirebbero prima ancora di arrivare al primo passo che li usa.
+      # Serve solo al processo del server, e sta li'.
 
     steps:
       - uses: actions/checkout@v4
@@ -144,6 +147,8 @@ jobs:
         run: pnpm --filter @fantacomics/web build
 
       - name: Avvia l'app e il portale di prova
+        env:
+          NODE_ENV: production
         run: |
           pnpm --filter @fantacomics/web start > /tmp/web.log 2>&1 &
           pnpm --filter @fantacomics/extension portale > /tmp/portale.log 2>&1 &
