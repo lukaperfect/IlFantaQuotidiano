@@ -71,6 +71,17 @@ jobs:
           "
 
 
+      - name: Sintassi dei file dell'estensione
+        # L'estensione e' JavaScript semplice: `tsc` non la copre, quindi un
+        # errore di sintassi passerebbe fino al browser dell'utente. `--check`
+        # costa millisecondi e chiude quel buco.
+        run: |
+          for f in apps/extension/src/*.js; do
+            node --check "$f" || exit 1
+          done
+          node -e "JSON.parse(require('fs').readFileSync('apps/extension/manifest.json','utf8'))"
+          echo "Estensione: sintassi e manifest a posto."
+
       - name: Build dell'app web
         # `next build` e' l'unico controllo di tipi che copre apps/web: il
         # tsconfig radice non include l'app, quindi senza questo passo un
@@ -88,3 +99,78 @@ jobs:
           test -s ci-out/giornale-stampa.html || { echo "giornale-stampa.html mancante"; exit 1; }
           test "$(ls ci-out/card-*.svg | wc -l)" -ge 8 || { echo "card personali mancanti"; exit 1; }
           echo "Artefatti verificati."
+
+  browser:
+    name: Sicurezza e catena dell'estensione, in un browser vero
+    runs-on: ubuntu-latest
+    needs: verifica
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+      FANTACOMICS_SECRET: chiave-di-prova-lunga-abbastanza-per-la-ci-000
+      FANTACOMICS_MAIL_LOG: /tmp/posta.jsonl
+      FANTACOMICS_URL: http://localhost:3000
+      NODE_ENV: production
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Installa le dipendenze
+        run: pnpm install --frozen-lockfile
+
+      - name: Installa Chromium
+        # Qui il browser serve davvero: senza, queste verifiche non esistono.
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Build dell'app web
+        run: pnpm --filter @fantacomics/web build
+
+      - name: Avvia l'app e il portale di prova
+        run: |
+          pnpm --filter @fantacomics/web start > /tmp/web.log 2>&1 &
+          pnpm --filter @fantacomics/extension portale > /tmp/portale.log 2>&1 &
+          for i in $(seq 1 40); do
+            curl -sf http://localhost:3000/accedi > /dev/null && \
+            curl -sf http://127.0.0.1:4173/ > /dev/null && break
+            sleep 1
+          done
+          curl -sf http://localhost:3000/accedi > /dev/null || { cat /tmp/web.log; exit 1; }
+          curl -sf http://127.0.0.1:4173/ > /dev/null || { cat /tmp/portale.log; exit 1; }
+
+      - name: Asserzioni di sicurezza dell'app
+        # Home protetta, magic link monouso, link aperto altrove che non apre
+        # sessioni, isolamento fra account, revoca dello slug.
+        run: node apps/web/smoke.mjs
+
+      - name: Relay autenticato
+        run: pnpm exec tsx apps/worker/src/scripts/verifica-relay.ts
+
+      - name: Catena dell'estensione in Chromium
+        # Carica l'estensione vera in un browser vero contro un portale che
+        # scarica i propri dati come farebbe un sito: intercettazione,
+        # mappatura, relay, giornale pubblicato.
+        run: pnpm exec tsx apps/extension/test/verifica.ts
+
+      - name: Log in caso di guasto
+        if: failure()
+        run: |
+          echo '--- app ---'; tail -50 /tmp/web.log || true
+          echo '--- portale ---'; tail -20 /tmp/portale.log || true

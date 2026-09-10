@@ -33,7 +33,7 @@ Da qui tre inversioni che governano tutto il codice:
 
 ```bash
 pnpm install
-pnpm test                                   # 230 test (215 senza database)
+pnpm test                                   # 237 test (222 senza database)
 pnpm demo -- --out out --giornate 6         # una stagione simulata end-to-end
 pnpm demo -- --out out --giornate 4 --assets   # aggiunge PDF e PNG reali (serve Chromium)
 
@@ -47,6 +47,28 @@ pnpm --filter @fantacomics/web start        # http://localhost:3000
 L'accesso è senza password: si inserisce l'email e arriva un link valido
 quindici minuti, utilizzabile una volta sola. In sviluppo il link finisce in
 `FANTACOMICS_MAIL_LOG` (o sul log se non è impostata) invece di essere spedito.
+
+### L'estensione
+
+```bash
+# 1. un portale finto che scarica i propri dati come farebbe un sito vero
+pnpm --filter @fantacomics/extension portale       # http://127.0.0.1:4173
+
+# 2. la catena completa in un browser vero, con l'estensione caricata
+DATABASE_URL=... pnpm --filter @fantacomics/extension verifica
+```
+
+La verifica carica `apps/extension` in Chromium, apre il portale, arma la
+cattura e controlla venti asserzioni: che a estensione **disarmata** non venga
+catturato niente, che armata prenda tutte e cinque le risposte — compresa
+quella via `XMLHttpRequest`, che dentro la pagina è una strada diversa da
+`fetch` — che il relay accetti, che il giornale esista davvero all'indirizzo
+pubblico, e che «Ferma» svuoti la memoria senza riprendere da sola.
+
+Per installarla a mano: `chrome://extensions` → Modalità sviluppatore →
+«Carica estensione non pacchettizzata» → `apps/extension`. Nel popup si
+incollano l'indirizzo di FantaComics e la chiave che si genera dalla pagina
+della lega.
 
 `FANTACOMICS_SECRET` non ha un valore di ripiego in produzione: senza, l'app
 **si rifiuta di partire**. Un default che funziona anche in produzione è la
@@ -104,6 +126,7 @@ driver template.
 | `pipeline` | Pipeline a sette step, store, configurazione lega | Condivisa tra worker e app web |
 | `apps/worker` | CLI della stagione, generazione PDF/PNG | Container long-running: Chromium non sta in serverless |
 | `apps/web` | Onboarding, archivio, lettura, card condivisibili | Il piano di controllo; il giornale resta un documento autonomo |
+| `apps/extension` | Estensione MV3: intercetta, non scrapa | Il collector consigliato, più il portale finto che lo verifica |
 
 ## Le decisioni che contano
 
@@ -170,6 +193,37 @@ uno slug lungo e casuale, separato dall'identità della lega e rigenerabile in u
 secondo. Per questo le risposte del giornale sono `no-store`: un segreto
 revocabile che resta in una cache per ore rende la revoca una bugia.
 
+**L'estensione intercetta, non scrapa.** Legge le risposte JSON che la pagina
+della piattaforma ha *già* scaricato nella sessione dell'utente: nessuna
+credenziale custodita (la password di una piattaforma terza è riusata altrove
+nel 90% dei casi), nessun rischio di ban — il traffico è quello dell'utente, con
+il suo IP e volumi umani — e payload che cambiano molto più lentamente del DOM.
+Niente parte da solo: la cattura si arma con un gesto e l'invio con un altro, e
+«Ferma» svuota davvero la memoria. Un'estensione che spedisce in sottofondo è
+indistinguibile da uno spyware, quali che siano le intenzioni di chi l'ha
+scritta.
+
+**L'identità della lega viene dalla chiave, mai dal corpo.** Il relay è
+autenticato da una chiave per lega, distinta dallo slug pubblico perché concede
+un potere diverso: lo slug fa leggere il giornale, la chiave fa entrare dati.
+L'envelope porta anche un identificatore della lega sulla piattaforma, ma è
+un'etichetta diagnostica — se decidesse lui la destinazione, chiunque potrebbe
+scrivere nell'archivio di chiunque cambiando una stringa.
+
+**Il mapping sta sul server.** Quali risposte guardare e come si chiamano i
+campi dentro è un dato, non codice: si corregge lato server e l'estensione lo
+riceve alla riapertura. L'alternativa — ricompilare, ripubblicare, aspettare che
+gli utenti aggiornino — significa saltare una o due giornate, e su un prodotto
+settimanale saltare una giornata è perdere l'abitudine. Per la stessa ragione il
+client non porta con sé la propria mappatura: oltre a essere manipolabile,
+vanificherebbe il motivo per cui la mappatura è un dato.
+
+**Le due sorgenti convergono sugli stessi costruttori.** CSV esportato a mano e
+payload dell'estensione producono righe, e da lì in poi il codice è identico. Un
+test lo dimostra: stessa giornata, stesso snapshot. Non è eleganza fine a sé
+stessa — è ciò che rende vera la frase «abbiamo un percorso di riserva». Se le
+due vie divergessero, il ripiego produrrebbe un prodotto diverso.
+
 **Estetica solo tipografica.** Nessuna foto di calciatori: non è gusto ma
 rischio: i diritti sulle immagini di Serie A bloccano la monetizzazione al primo
 tentativo.
@@ -178,9 +232,13 @@ tentativo.
 
 Per andare in produzione servono, nell'ordine:
 
-1. **Un adapter reale** verso una piattaforma di fantacalcio, più l'estensione
-   browser che ne è il collector consigliato. Il contratto, l'endpoint di relay
-   (`POST /api/relay`) e il canary ci sono; manca la mappatura dei campi veri.
+1. **I nomi dei campi veri.** L'estensione esiste, è verificata in un browser
+   contro un portale di prova che scarica i propri dati come farebbe un sito
+   vero, e la catena regge tutta: intercettazione (`fetch` e `XMLHttpRequest`),
+   mappatura, relay autenticato, giornale pubblicato. Quello che manca è un
+   solo profilo di piattaforma — quali URL guardare e come si chiamano i campi
+   dentro — che è esattamente la parte progettata per essere un dato
+   aggiornabile lato server. Si compila osservando le risposte reali una volta.
 2. **Un provider di posta vero**: il `Mailer` è un'interfaccia con
    implementazioni su console e su file. Serve collegarci un servizio prima di
    far accedere qualcuno che non sia sulla stessa macchina.

@@ -24,6 +24,31 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.20.2)
 
+  apps/extension:
+    dependencies:
+      '@fantacomics/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
+      '@fantacomics/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@fantacomics/ingest':
+        specifier: workspace:*
+        version: link:../../packages/ingest
+      '@fantacomics/pipeline':
+        specifier: workspace:*
+        version: link:../../packages/pipeline
+      pg:
+        specifier: ^8.13.1
+        version: 8.23.0
+      playwright:
+        specifier: ^1.63.0
+        version: 1.63.0
+    devDependencies:
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.23.1
+
   apps/web:
     dependencies:
       '@fantacomics/auth':

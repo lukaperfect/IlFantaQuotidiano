@@ -1,0 +1,21 @@
+{
+  "name": "@fantacomics/extension",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "portale": "tsx test/portale/server.ts",
+    "verifica": "tsx test/verifica.ts"
+  },
+  "dependencies": {
+    "@fantacomics/core": "workspace:*",
+    "@fantacomics/ingest": "workspace:*",
+    "@fantacomics/auth": "workspace:*",
+    "@fantacomics/pipeline": "workspace:*",
+    "pg": "^8.13.1",
+    "playwright": "^1.63.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.10"
+  }
+}
