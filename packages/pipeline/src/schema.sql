@@ -58,6 +58,11 @@ create table if not exists editions (
   primary key (league_id, matchday)
 );
 
+-- Quando un umano ha approvato un'edizione sotto soglia. Aggiunta dopo,
+-- quindi come ALTER: uno schema che si applica solo ai database nuovi non e'
+-- uno schema.
+alter table editions add column if not exists approved_at timestamptz;
+
 create table if not exists league_state (
   league_id  text primary key,
   memory     jsonb not null,

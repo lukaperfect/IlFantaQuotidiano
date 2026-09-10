@@ -147,6 +147,38 @@ async function main(): Promise<void> {
   ok('e infatti quella giornata non esiste', nonPubblicata.status === 404,
      `status ${nonPubblicata.status}`);
 
+  // 5-ter. Un'edizione sotto soglia NON esce, nemmeno per chi ha il link.
+  //
+  // E' il difetto piu' grave che ho trovato in questa passata: la confidenza
+  // veniva calcolata e poi ignorata da OGNI percorso di lettura. Un giornale
+  // con la riconciliazione fallita finiva nel gruppo esattamente come uno
+  // buono, e "meglio nessun giornale che un giornale sbagliato" era una frase
+  // senza codice sotto.
+  const pubblicata = (await store.getEdition(leagueId, 7))!;
+  await store.saveEdition(
+    leagueId,
+    { ...pubblicata.edition, meta: { ...pubblicata.edition.meta, confidence: 0.41 } },
+    pubblicata.pack,
+  );
+
+  for (const [nome, percorso] of [
+    ['giornale', `/g/${publicSlug}/7`],
+    ['versione da stampa', `/g/${publicSlug}/7/stampa`],
+    ['immagine della card', `/g/${publicSlug}/7/card/t1/img`],
+  ] as const) {
+    const r = await fetch(`${base}${percorso}`);
+    ok(`in revisione: ${nome} risponde 404`, r.status === 404, `status ${r.status}`);
+  }
+
+  // Approvandola torna leggibile: la coda di revisione e' una coda, non un
+  // cestino — qualcuno la guarda e decide.
+  ok('approvazione registrata',
+     await store.approveEdition(leagueId, 7, new Date().toISOString()));
+  const dopo = await fetch(`${base}/g/${publicSlug}/7`);
+  ok('approvata, il giornale torna leggibile', dopo.status === 200, `status ${dopo.status}`);
+  ok('e il testo non e’ stato toccato',
+     (await store.getEdition(leagueId, 7))?.edition.meta.confidence === 0.41);
+
   // 6. Revocare la chiave la spegne subito.
   const config = await store.getConfigForOwner(leagueId, 'acc-verifica');
   await store.saveConfig({ ...config!, relaySecret: null });

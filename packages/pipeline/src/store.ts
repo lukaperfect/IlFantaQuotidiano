@@ -64,7 +64,36 @@ export type LeagueConfig = {
 export type PublishedEdition = {
   edition: Edition;
   pack: FactPack;
+  /**
+   * Quando un umano ha detto "va bene lo stesso".
+   *
+   * `null` finche' nessuno l'ha guardata. Serve solo alle edizioni sotto
+   * soglia: quelle sopra non hanno bisogno di permesso.
+   */
+  approvedAt: string | null;
 };
+
+/**
+ * Sotto questa soglia l'edizione NON si serve al pubblico: va in revisione.
+ *
+ * Sta qui e non nella pipeline perche' non e' una proprieta' della
+ * generazione, e' una proprieta' della lettura. Chi serve il giornale deve
+ * poterla applicare senza tirarsi dentro tutta la pipeline — ed e' proprio
+ * perche' viveva solo dentro la pipeline che nessuno la applicava.
+ */
+export const MIN_PUBLISH_CONFIDENCE = 0.6;
+
+/**
+ * Si puo' servire al pubblico?
+ *
+ * Il numero da solo non basta: un'edizione sotto soglia che un umano ha
+ * guardato e approvato e' pubblicabile, ed e' tutto il senso di avere una
+ * coda di revisione invece di un cestino.
+ */
+export function edizioneLeggibile(published: PublishedEdition): boolean {
+  return published.approvedAt !== null
+    || published.edition.meta.confidence >= MIN_PUBLISH_CONFIDENCE;
+}
 
 export interface LeagueStore {
   /**
@@ -91,6 +120,11 @@ export interface LeagueStore {
   getHistory(leagueId: string): Promise<LeagueHistory>;
   appendHistory(leagueId: string, entry: HistoricalMatchday): Promise<void>;
   saveEdition(leagueId: string, edition: Edition, pack: FactPack): Promise<void>;
+  /**
+   * Approva un'edizione sotto soglia. Dice se l'ha approvata questa chiamata:
+   * un'approvazione che non trova l'edizione non deve poter dire di si'.
+   */
+  approveEdition(leagueId: string, matchday: number, at: string): Promise<boolean>;
   /** Distribuzione cross-lega: il vantaggio competitivo che cresce con gli utenti. */
   getCorpus(): Promise<RarityCorpus | null>;
   addToCorpus(points: readonly number[]): Promise<void>;
@@ -217,9 +251,22 @@ export class FileLeagueStore implements LeagueStore {
   }
 
   async getEdition(leagueId: string, matchday: number): Promise<PublishedEdition | null> {
-    return this.readJson<PublishedEdition | null>(
+    const letta = await this.readJson<PublishedEdition | null>(
       this.path('editions', leagueId, `g${matchday}.json`), null,
     );
+    // Le edizioni scritte prima che l'approvazione esistesse non hanno il
+    // campo: valgono come non approvate, che e' la lettura prudente.
+    return letta ? { ...letta, approvedAt: letta.approvedAt ?? null } : null;
+  }
+
+  async approveEdition(leagueId: string, matchday: number, at: string): Promise<boolean> {
+    const corrente = await this.getEdition(leagueId, matchday);
+    if (!corrente) return false;
+    await this.writeJson(
+      this.path('editions', leagueId, `g${matchday}.json`),
+      { ...corrente, approvedAt: at } satisfies PublishedEdition,
+    );
+    return true;
   }
 
   async listEditions(leagueId: string): Promise<number[]> {
@@ -257,9 +304,11 @@ export class FileLeagueStore implements LeagueStore {
   }
 
   async saveEdition(leagueId: string, edition: Edition, pack: FactPack): Promise<void> {
+    // Rigenerare una giornata azzera l'approvazione: il testo e' cambiato,
+    // quindi il "va bene" di prima non riguarda piu' questo giornale.
     await this.writeJson(
       this.path('editions', leagueId, `g${edition.meta.matchday}.json`),
-      { edition, pack } satisfies PublishedEdition,
+      { edition, pack, approvedAt: null } satisfies PublishedEdition,
     );
     const config = await this.readConfig(leagueId);
     if (config && (config.lastMatchday ?? 0) < edition.meta.matchday) {
@@ -327,8 +376,16 @@ export class InMemoryLeagueStore implements LeagueStore {
       .sort((a, b) => a.matchday - b.matchday);
   }
 
+  async approveEdition(leagueId: string, matchday: number, at: string): Promise<boolean> {
+    const chiave = `${leagueId}:${matchday}`;
+    const corrente = this.editions.get(chiave);
+    if (!corrente) return false;
+    this.editions.set(chiave, { ...corrente, approvedAt: at });
+    return true;
+  }
+
   async saveEdition(leagueId: string, edition: Edition, pack: FactPack): Promise<void> {
-    this.editions.set(`${leagueId}:${edition.meta.matchday}`, { edition, pack });
+    this.editions.set(`${leagueId}:${edition.meta.matchday}`, { edition, pack, approvedAt: null });
     const config = this.configs.get(leagueId);
     if (config && (config.lastMatchday ?? 0) < edition.meta.matchday) {
       this.configs.set(leagueId, { ...config, lastMatchday: edition.meta.matchday });

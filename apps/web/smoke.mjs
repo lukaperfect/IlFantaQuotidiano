@@ -147,6 +147,23 @@ ok('Giulia non vede leghe di Mario', legheGiulia === 0, `${legheGiulia} leghe vi
 const resp = await giulia.page.goto(`${base}/lega/${legaId}`, { waitUntil: 'domcontentloaded' });
 ok('lega altrui risponde 404', resp?.status() === 404, `status ${resp?.status()}`);
 
+/**
+ * 5-bis. L'anteprima di revisione e' del proprietario, non di chi ha il link.
+ *
+ * Un'edizione sotto soglia non si serve al pubblico, ma l'admin deve poterla
+ * rivedere: quella pagina passa dall'id interno e dalla sessione, non dallo
+ * slug condiviso. Qui si verifica proprio quel confine — la porta sulla
+ * soglia e' verificata dove si puo' fabbricare un'edizione scadente, cioe'
+ * nella verifica del relay, che parla direttamente con lo store.
+ */
+const anteprimaProprietario = await mario.page.request.get(`${base}/lega/${legaId}/anteprima/1`);
+ok('il proprietario puo’ rivedere una sua edizione',
+   anteprimaProprietario.status() === 200, `status ${anteprimaProprietario.status()}`);
+
+const anteprimaEstraneo = await lettore.page.request.get(`${base}/lega/${legaId}/anteprima/1`);
+ok('chi ha solo il link pubblico non puo’ aprire l’anteprima',
+   anteprimaEstraneo.status() === 404, `status ${anteprimaEstraneo.status()}`);
+
 // 6. Rigenerare lo slug revoca il link precedente
 await mario.page.goto(legaUrl, { waitUntil: 'domcontentloaded' });
 await mario.page.locator('.share-box code').waitFor({ state: 'visible', timeout: 20000 });

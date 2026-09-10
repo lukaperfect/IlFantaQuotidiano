@@ -33,7 +33,7 @@ Da qui tre inversioni che governano tutto il codice:
 
 ```bash
 pnpm install
-pnpm test                                   # 253 test (238 senza database)
+pnpm test                                   # 261 test (246 senza database)
 pnpm demo -- --out out --giornate 6         # una stagione simulata end-to-end
 pnpm demo -- --out out --giornate 4 --assets   # aggiunge PDF e PNG reali (serve Chromium)
 
@@ -206,6 +206,19 @@ quale account* sta per entrare: chi l'ha chiesto riconosce il proprio
 indirizzo, chi se l'è visto girare ne legge uno che non conosce. La conferma è
 una server action, cioè una POST con verifica dell'origine, perché una GET che
 apre una sessione si attiva seguendo un collegamento qualunque.
+
+**La coda di revisione è una coda, non un'etichetta.** La soglia di confidenza
+esisteva da sempre: la pipeline la calcolava, la CLI la stampava, il relay la
+riportava nella risposta. E poi *nessun percorso di lettura la guardava*. Un
+giornale con la riconciliazione fallita rispondeva all'indirizzo pubblico
+esattamente come uno buono, quindi «meglio nessun giornale che un giornale
+sbagliato» era una frase senza codice sotto. Ora sotto soglia tutte e quattro le
+uscite pubbliche — giornale, versione da stampa, pagina card e immagine —
+rispondono **404**, lo stesso di una lega altrui: chi ha il link non deve
+nemmeno sapere che esiste una bozza. Il proprietario la rivede da un indirizzo
+che passa dall'id interno e dalla sessione, e decide: approvarla registra un
+giudizio umano senza toccare il testo, e rigenerare la giornata azzera
+l'approvazione, perché quel «va bene» riguardava quel giornale lì.
 
 **Il giornale è pubblico, il link è revocabile.** La lettura senza account non è
 una svista: è il ciclo di condivisione che regge il prodotto. Ma l'indirizzo è

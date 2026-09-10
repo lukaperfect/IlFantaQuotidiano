@@ -108,11 +108,18 @@ export class PostgresLeagueStore implements LeagueStore {
 
   async getEdition(leagueId: string, matchday: number): Promise<PublishedEdition | null> {
     const { rows } = await this.pool.query(
-      'select edition, pack from editions where league_id = $1 and matchday = $2',
+      'select edition, pack, approved_at from editions where league_id = $1 and matchday = $2',
       [leagueId, matchday],
     );
     const row = rows[0];
-    return row ? { edition: row.edition as Edition, pack: row.pack as FactPack } : null;
+    if (!row) return null;
+    return {
+      edition: row.edition as Edition,
+      pack: row.pack as FactPack,
+      approvedAt: row.approved_at === null || row.approved_at === undefined
+        ? null
+        : (row.approved_at as Date).toISOString(),
+    };
   }
 
   async listEditions(leagueId: string): Promise<number[]> {
@@ -124,9 +131,13 @@ export class PostgresLeagueStore implements LeagueStore {
 
   async saveEdition(leagueId: string, edition: Edition, pack: FactPack): Promise<void> {
     await this.pool.query(
-      `insert into editions (league_id, matchday, edition, pack) values ($1,$2,$3,$4)
+      `insert into editions (league_id, matchday, edition, pack, approved_at)
+       values ($1,$2,$3,$4,null)
        on conflict (league_id, matchday) do update set
-         edition = excluded.edition, pack = excluded.pack`,
+         edition = excluded.edition, pack = excluded.pack,
+         -- Rigenerare azzera l'approvazione: il testo e' cambiato, quindi il
+         -- "va bene" di prima non riguarda piu' questo giornale.
+         approved_at = null`,
       [leagueId, edition.meta.matchday, JSON.stringify(edition), JSON.stringify(pack)],
     );
     // L'ultima giornata avanza sola: `greatest` evita che una rigenerazione di
@@ -170,6 +181,14 @@ export class PostgresLeagueStore implements LeagueStore {
        on conflict (league_id) do update set history = excluded.history`,
       [leagueId, JSON.stringify(next)],
     );
+  }
+
+  async approveEdition(leagueId: string, matchday: number, at: string): Promise<boolean> {
+    const { rowCount } = await this.pool.query(
+      'update editions set approved_at = $3 where league_id = $1 and matchday = $2',
+      [leagueId, matchday, at],
+    );
+    return (rowCount ?? 0) === 1;
   }
 
   async getCorpus(): Promise<RarityCorpus | null> {

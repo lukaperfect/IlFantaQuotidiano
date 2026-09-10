@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { DEFAULT_RULESET } from '@fantacomics/core';
 import { generateWorld, withOfficialScores, nudgeTeamToScore } from '@fantacomics/ingest';
 import { TemplateDriver } from '@fantacomics/llm';
-import { runMatchdayPipeline, MIN_PUBLISH_CONFIDENCE } from './pipeline.js';
+import { runMatchdayPipeline } from './pipeline.js';
+import { MIN_PUBLISH_CONFIDENCE } from './store.js';
 import { InMemoryLeagueStore } from './store.js';
 
 const R = DEFAULT_RULESET;

@@ -11,7 +11,7 @@ import {
 } from '@fantacomics/editorial';
 import { generateEdition, TemplateDriver, textOfEdition, type LlmDriver } from '@fantacomics/llm';
 import { renderWebPage, renderPrintPage, renderCardSvg, cardsOf } from '@fantacomics/render';
-import type { LeagueStore } from './store.js';
+import { MIN_PUBLISH_CONFIDENCE, type LeagueStore } from './store.js';
 
 /**
  * LA PIPELINE.
@@ -61,9 +61,6 @@ export type PipelineOutput = {
   /** Falso quando l'edizione va in coda di revisione invece che online. */
   publishable: boolean;
 };
-
-/** Sotto questa soglia l'edizione non si pubblica: si mette in revisione umana. */
-export const MIN_PUBLISH_CONFIDENCE = 0.6;
 
 const personaNames = Object.fromEntries(PERSONAS.map((p) => [p.id, p.name]));
 

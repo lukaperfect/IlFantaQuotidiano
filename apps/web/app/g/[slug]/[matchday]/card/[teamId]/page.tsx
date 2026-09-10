@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { store } from '@/lib/store';
+import { edizioneLeggibile } from '@fantacomics/pipeline';
 import { ShareButton } from './share';
 
 export const dynamic = 'force-dynamic';
@@ -40,6 +41,16 @@ export default async function CardPage({ params }: Props) {
 
   const published = await store.getEdition(config.leagueId, Number(matchday));
   if (!published) notFound();
+  /**
+   * Sotto soglia non si serve, e si risponde come a un'edizione che non c'e'.
+   *
+   * La confidenza veniva calcolata e poi ignorata da OGNI percorso di lettura:
+   * un'edizione con riconciliazione fallita finiva nel gruppo esattamente come
+   * una buona, e "meglio nessun giornale che un giornale sbagliato" era una
+   * frase senza codice sotto. Il 404 e' lo stesso di una lega altrui: chi ha
+   * il link non deve nemmeno sapere che esiste una bozza.
+   */
+  if (!edizioneLeggibile(published)) notFound();
 
   const card = published.edition.personalCards.find((c) => c.teamId === teamId);
   if (!card) notFound();

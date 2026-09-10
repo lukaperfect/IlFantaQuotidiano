@@ -2,8 +2,9 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { store } from '@/lib/store';
 import { requireAccount } from '@/lib/session';
+import { edizioneLeggibile } from '@fantacomics/pipeline';
 import {
-  rigeneraLink, generaChiaveEstensione, revocaChiaveEstensione,
+  rigeneraLink, generaChiaveEstensione, revocaChiaveEstensione, approvaEdizione,
 } from '@/app/actions';
 import { ConfigForm } from './config-form';
 
@@ -22,7 +23,12 @@ export default async function Lega({ params }: { params: Promise<{ id: string }>
   const editions = await Promise.all(
     matchdays.map(async (n) => {
       const published = await store.getEdition(id, n);
-      return { n, edition: published?.edition ?? null };
+      return {
+        n,
+        edition: published?.edition ?? null,
+        leggibile: published ? edizioneLeggibile(published) : false,
+        approvata: published?.approvedAt ?? null,
+      };
     }),
   );
 
@@ -41,7 +47,7 @@ export default async function Lega({ params }: { params: Promise<{ id: string }>
         <p className="muted">Nessuna edizione ancora pubblicata.</p>
       ) : (
         <ul className="card-list">
-          {editions.map(({ n, edition }) => (
+          {editions.map(({ n, edition, leggibile, approvata }) => (
             <li key={n} className="item">
               <span>
                 <strong>Giornata {n}</strong>
@@ -51,19 +57,40 @@ export default async function Lega({ params }: { params: Promise<{ id: string }>
                     ? `${edition.articles.length} pezzi · confidenza ${edition.meta.confidence.toFixed(2)}`
                     : '—'}
                   {edition?.meta.degraded ? ' · edizione ridotta' : ''}
-                  {edition && edition.meta.confidence < 0.6 ? ' · in revisione' : ''}
+                  {!leggibile ? ' · in revisione, non pubblica' : ''}
+                  {approvata ? ' · approvata a mano' : ''}
                 </span>
               </span>
               <span className="row">
-                <Link className="btn" href={`/g/${config.publicSlug}/${n}`}>Leggi</Link>
-                {edition?.personalCards[0] ? (
-                  <Link
-                    className="btn"
-                    href={`/g/${config.publicSlug}/${n}/card/${edition.personalCards[0].teamId}`}
-                  >
-                    Card
-                  </Link>
-                ) : null}
+                {leggibile ? (
+                  <>
+                    <Link className="btn" href={`/g/${config.publicSlug}/${n}`}>Leggi</Link>
+                    {edition?.personalCards[0] ? (
+                      <Link
+                        className="btn"
+                        href={`/g/${config.publicSlug}/${n}/card/${edition.personalCards[0].teamId}`}
+                      >
+                        Card
+                      </Link>
+                    ) : null}
+                  </>
+                ) : (
+                  <>
+                    {/* L'anteprima passa dall'id interno e dalla sessione, non
+                        dallo slug: chi ha il link condiviso non deve poter
+                        aprire una bozza. */}
+                    <Link className="btn" href={`/lega/${config.leagueId}/anteprima/${n}`}>
+                      Rivedi
+                    </Link>
+                    <form action={approvaEdizione}>
+                      <input type="hidden" name="leagueId" value={config.leagueId} />
+                      <input type="hidden" name="matchday" value={n} />
+                      <button className="btn btn--primary" type="submit">
+                        Pubblica lo stesso
+                      </button>
+                    </form>
+                  </>
+                )}
               </span>
             </li>
           ))}
@@ -71,6 +98,12 @@ export default async function Lega({ params }: { params: Promise<{ id: string }>
       )}
 
       <h2>Link da condividere</h2>
+      <p className="muted small">
+        Un&rsquo;edizione in revisione non risponde a questo indirizzo, nemmeno per
+        chi ha gi&agrave; il link: sotto la soglia di confidenza il giornale non esce,
+        e &laquo;meglio nessun giornale che un giornale sbagliato&raquo; deve valere anche
+        quando &egrave; scomodo. La rivedi qui sopra e decidi tu.
+      </p>
       <p className="muted small">
         Il giornale si legge senza account: è così che gira nel gruppo. L’indirizzo
         è un segreto lungo e separato dall’identità della lega, quindi se finisce

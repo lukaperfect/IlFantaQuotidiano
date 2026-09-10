@@ -7,7 +7,7 @@ import { DEFAULT_RULESET } from '@fantacomics/core';
 import {
   issueMagicLink, consumeMagicLink, peekMagicLink, hashToken, type AuthStore,
 } from '@fantacomics/auth';
-import { FileLeagueStore, type LeagueStore } from './store.js';
+import { FileLeagueStore, edizioneLeggibile, type LeagueStore } from './store.js';
 import { FileAuthStore } from './auth-store.js';
 import { PostgresLeagueStore, PostgresAuthStore, migrate } from './postgres-store.js';
 
@@ -54,6 +54,23 @@ const implementazioni: { nome: string; salta: boolean; crea: () => Promise<Ambie
     },
   },
 ];
+
+const edizione = (matchday: number, confidence: number) => ({
+  meta: {
+    leagueId: 'lega-1', leagueName: 'Lega Uno', season: '2025-26', matchday,
+    publishedAt: '2026-01-06T08:00:00.000Z', factEngineVersion: '1.0.0',
+    promptVersion: '1.0.0', rulesetVersion: 1, models: { template: 'template' },
+    selectorSeed: 'x', confidence, degraded: false,
+  },
+  masthead: { title: 'FantaComics', tagline: '' },
+  articles: [{ slot: 'apertura', format: 'f', persona: 'p', blocks: [], factIds: [] }],
+  personalCards: [],
+}) as never;
+
+const packVuoto = (matchday: number) => ({
+  leagueId: 'lega-1', leagueName: 'Lega Uno', matchday, season: '2025-26',
+  factEngineVersion: '1.0.0', facts: [], results: [], standings: [],
+}) as never;
 
 const lega = (over: Record<string, unknown> = {}) => ({
   leagueId: 'lega-1', ownerId: 'acc-mario', publicSlug: 'slug-lungo-e-casuale',
@@ -158,6 +175,56 @@ for (const impl of implementazioni) {
       expect(letto?.pack.leagueName).toBe('Lega Uno');
       expect(await env.league.listEditions('lega-1')).toEqual([7]);
       expect((await env.league.getConfigForOwner('lega-1', 'acc-mario'))?.lastMatchday).toBe(7);
+    });
+
+    it('un’edizione sotto soglia non e’ leggibile finche’ nessuno la approva', async () => {
+      /**
+       * La confidenza veniva calcolata e poi ignorata da ogni percorso di
+       * lettura: un'edizione con riconciliazione fallita finiva nel gruppo
+       * esattamente come una buona. Qui la soglia e' una proprieta' della
+       * lettura, non un numero stampato accanto al titolo.
+       */
+      await env.league.saveConfig(lega());
+      await env.league.saveEdition('lega-1', edizione(7, 0.42), packVuoto(7));
+
+      const sotto = await env.league.getEdition('lega-1', 7);
+      expect(sotto?.approvedAt).toBeNull();
+      expect(edizioneLeggibile(sotto!)).toBe(false);
+
+      expect(await env.league.approveEdition('lega-1', 7, '2026-01-06T09:00:00.000Z')).toBe(true);
+      const approvata = await env.league.getEdition('lega-1', 7);
+      expect(approvata?.approvedAt).toBe('2026-01-06T09:00:00.000Z');
+      expect(edizioneLeggibile(approvata!)).toBe(true);
+      // Il testo non si tocca: l'approvazione registra un giudizio, non lo cambia.
+      expect(approvata?.edition.meta.confidence).toBe(0.42);
+    });
+
+    it('sopra soglia non serve il permesso di nessuno', async () => {
+      await env.league.saveConfig(lega());
+      await env.league.saveEdition('lega-1', edizione(8, 0.91), packVuoto(8));
+      const letta = await env.league.getEdition('lega-1', 8);
+      expect(letta?.approvedAt).toBeNull();
+      expect(edizioneLeggibile(letta!)).toBe(true);
+    });
+
+    it('rigenerare la giornata azzera l’approvazione', async () => {
+      // Il "va bene" riguardava QUEL giornale: se il testo cambia, va
+      // riguardato. Un'approvazione che sopravvive alla rigenerazione
+      // pubblicherebbe alla cieca un testo che nessuno ha letto.
+      await env.league.saveConfig(lega());
+      await env.league.saveEdition('lega-1', edizione(9, 0.4), packVuoto(9));
+      await env.league.approveEdition('lega-1', 9, '2026-01-06T09:00:00.000Z');
+      expect(edizioneLeggibile((await env.league.getEdition('lega-1', 9))!)).toBe(true);
+
+      await env.league.saveEdition('lega-1', edizione(9, 0.4), packVuoto(9));
+      const rifatta = await env.league.getEdition('lega-1', 9);
+      expect(rifatta?.approvedAt).toBeNull();
+      expect(edizioneLeggibile(rifatta!)).toBe(false);
+    });
+
+    it('approvare un’edizione che non c’e’ dice di no', async () => {
+      await env.league.saveConfig(lega());
+      expect(await env.league.approveEdition('lega-1', 33, '2026-01-06T09:00:00.000Z')).toBe(false);
     });
 
     it('non fa arretrare l’ultima giornata rigenerandone una vecchia', async () => {

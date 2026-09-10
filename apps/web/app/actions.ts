@@ -292,6 +292,25 @@ export async function revocaChiaveEstensione(form: FormData): Promise<void> {
   redirect(`/lega/${leagueId}`);
 }
 
+/**
+ * Approva un'edizione sotto soglia.
+ *
+ * Non alza la confidenza e non tocca il testo: registra che un umano l'ha
+ * guardata e ha detto che va bene. Rigenerare la giornata azzera
+ * l'approvazione, perche' il "va bene" riguardava quel giornale li'.
+ */
+export async function approvaEdizione(form: FormData): Promise<void> {
+  const account = await requireAccount();
+  const leagueId = String(form.get('leagueId') ?? '');
+  const matchday = Number(form.get('matchday') ?? 0);
+  const config = await store.getConfigForOwner(leagueId, account.accountId);
+  if (!config) redirect('/');
+
+  await store.approveEdition(leagueId, matchday, new Date().toISOString());
+  revalidatePath(`/lega/${leagueId}`);
+  redirect(`/lega/${leagueId}`);
+}
+
 /** Rigenera lo slug pubblico: revoca ogni link condiviso in precedenza. */
 export async function rigeneraLink(form: FormData): Promise<void> {
   const account = await requireAccount();
