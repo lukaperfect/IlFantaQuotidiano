@@ -135,6 +135,8 @@ export const CollectorKindSchema = z.enum([
   'browser-extension',
   'session-headless',
   'file-import',
+  /** Dati generati: sviluppo, demo e test di carico. Mai in produzione. */
+  'synthetic',
 ]);
 export type CollectorKind = z.infer<typeof CollectorKindSchema>;
 

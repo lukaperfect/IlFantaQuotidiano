@@ -4,7 +4,7 @@ import { computeFantaVote, type StatIndex } from './fantavote.js';
 import { computeModifier } from './modifier.js';
 import type { TeamScore } from './score.js';
 
-type Candidate = { playerId: string; role: Role; fv: number; vote: number };
+type Candidate = { playerId: string; role: Role; fv: number; vote: number | null };
 
 /** Enumerazione di combinazioni con tetto di sicurezza. */
 function combinations<T>(pool: readonly T[], k: number, cap = 50_000): T[][] {
@@ -43,9 +43,18 @@ function buildCandidates(
     if (seen.has(id)) continue;
     seen.add(id);
     const st = stats.get(id);
-    if (!st || st.vote === null) continue; // un SV non entra mai in un XI ottimale
-    const fv = computeFantaVote(st, rules);
-    if (fv === null) continue;
+    if (!st) continue;
+    /**
+     * Anche gli SV entrano, valutati 0.
+     *
+     * Escluderli sembrava giusto (un SV non e' mai la scelta migliore) ma
+     * rendeva l'ottimo INCALCOLABILE per chi aveva il portiere senza voto —
+     * e quella squadra perdeva in silenzio tutti i fatti sul rimpianto.
+     * Un XI reale un portiere lo deve schierare comunque, quindi l'ottimo
+     * si calcola alle stesse condizioni. Con fantavoto 0 finiscono in fondo
+     * da soli, tranne quando valgono davvero piu' di un rated in negativo.
+     */
+    const fv = computeFantaVote(st, rules) ?? 0;
     byRole.get(st.role)?.push({ playerId: id, role: st.role, fv, vote: st.vote });
   }
   for (const list of byRole.values()) list.sort((a, b) => b.fv - a.fv);
@@ -178,8 +187,14 @@ export type RegretBreakdown = {
   /** Aver lasciato fuori dai convocati chi andava convocato. */
   regretRoster: number;
   regretTotal: number;
+  /** Il modulo migliore usando gli stessi convocati: e' questo che va citato
+   *  quando si parla di rimpianto da modulo, non l'ottimo sull'intera rosa. */
+  bestSelectedModule: string;
   optimalModule: string;
   optimalSlots: LineupSlot[];
+  /** false se l'ottimo non e' calcolabile (es. nessun portiere con voto):
+   *  in quel caso rimpianto ed efficienza NON vanno raccontati. */
+  feasible: boolean;
   /** Il panchinaro simbolo: il miglior fantavoto rimasto fuori. */
   keyBenchPlayer: { playerId: string; fantaVote: number } | null;
 };
@@ -224,6 +239,8 @@ export function computeRegret(
   }
 
   return {
+    feasible: sameModule.feasible && anyModule.feasible && fullRoster.feasible,
+    bestSelectedModule: anyModule.feasible ? anyModule.module : effModule,
     actual,
     bestSelectedSameModule: round2(bestSelectedSameModule),
     bestSelectedAnyModule: round2(bestSelectedAnyModule),

@@ -62,6 +62,9 @@ importers:
       '@fantacomics/core':
         specifier: workspace:*
         version: link:../core
+      '@fantacomics/ingest':
+        specifier: workspace:*
+        version: link:../ingest
       '@fantacomics/scoring':
         specifier: workspace:*
         version: link:../scoring

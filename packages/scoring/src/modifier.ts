@@ -30,7 +30,7 @@ export function computeModifier(
 
   const inRole = effectiveXI.filter((s) => s.role === targetRole);
   if (inRole.length < cfg.minDefenders) {
-    return NOT_APPLIED(`servono almeno ${cfg.minDefenders} giocatori di ruolo ${targetRole}, schierati ${inRole.length}`);
+    return NOT_APPLIED(`schierati solo ${inRole.length} difensori invece dei ${cfg.minDefenders} richiesti`);
   }
 
   const contributors: { playerId: string; vote: number }[] = [];
@@ -50,7 +50,7 @@ export function computeModifier(
     .sort((a, b) => (b.vote ?? 0) - (a.vote ?? 0));
 
   if (rated.length < cfg.defendersInAverage) {
-    return NOT_APPLIED(`solo ${rated.length} giocatori di ruolo ${targetRole} con voto, ne servono ${cfg.defendersInAverage}`);
+    return NOT_APPLIED(`solo ${rated.length} difensori con voto, ne servono ${cfg.defendersInAverage} per la media`);
   }
 
   for (const st of rated.slice(0, cfg.defendersInAverage)) {
