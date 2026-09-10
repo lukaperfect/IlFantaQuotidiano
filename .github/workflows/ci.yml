@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verifica:
+    name: Typecheck e test
+    runs-on: ubuntu-latest
+    env:
+      # I test non usano il browser: solo la CLI lo fa, ed e' fuori dal
+      # percorso di CI. Scaricare Chromium a ogni run sarebbe puro spreco.
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Installa le dipendenze
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Demo end-to-end
+        # Il vero test di integrazione: la pipeline di produzione deve
+        # produrre un giornale completo su piu' giornate consecutive.
+        run: pnpm demo -- --out ci-out --giornate 3
+
+      - name: Verifica che la demo abbia prodotto il giornale
+        run: |
+          test -s ci-out/giornale.html || { echo "giornale.html mancante o vuoto"; exit 1; }
+          test -s ci-out/giornale-stampa.html || { echo "giornale-stampa.html mancante"; exit 1; }
+          test "$(ls ci-out/card-*.svg | wc -l)" -ge 8 || { echo "card personali mancanti"; exit 1; }
+          echo "Artefatti verificati."
