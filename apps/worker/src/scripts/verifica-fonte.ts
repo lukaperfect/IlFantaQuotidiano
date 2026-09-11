@@ -124,8 +124,17 @@ function alzaServizio(): Promise<{ server: Server; baseUrl: string }> {
   });
 }
 
-async function tick(conSegreto: string | null): Promise<Response> {
-  return fetch(`${base}/api/tick`, {
+/**
+ * `forza` salta l'attesa fra una richiesta e l'altra.
+ *
+ * Qui serve perche' la verifica comprime in pochi secondi quello che nella
+ * realta' succede in due giorni: senza, il secondo giro verrebbe
+ * (giustamente) saltato. Non salta nessun cancello di correttezza — la
+ * giornata a meta' resta bloccata lo stesso, ed e' proprio cio' che si
+ * verifica sotto.
+ */
+async function tick(conSegreto: string | null, forza = false): Promise<Response> {
+  return fetch(`${base}/api/tick${forza ? '?forza=1' : ''}`, {
     method: 'POST',
     headers: conSegreto ? { authorization: `Bearer ${conSegreto}` } : {},
   });
@@ -202,12 +211,33 @@ async function main(): Promise<void> {
   ok('nessun giornale all\'indirizzo pubblico finche\' la giornata non e\' finita',
      primaDelTempo.status === 404, `status ${primaDelTempo.status}`);
 
+  // 2-bis. L'ECONOMIA DELLE RICHIESTE, verificata dove si vede davvero.
+  //
+  //    La macchina a stati ha appena detto «cinque partite da giocare,
+  //    riprova fra un'ora». Un secondo giro subito dopo NON deve interrogare
+  //    il servizio: misurato su un fine settimana vero, rispettare quell'attesa
+  //    porta un cron da 144 richieste al giorno a 27. Con un tetto gratuito di
+  //    100 e' la differenza fra funzionare e non funzionare.
+  richieste.clear();
+  await tick(segreto);
+  ok('un secondo giro subito dopo non spende una richiesta',
+     (richieste.get(`voti:${GIORNATA}`) ?? 0) === 0,
+     `letture di /voti: ${richieste.get(`voti:${GIORNATA}`) ?? 0}`);
+
+  //    E con «forza» invece la spende: e' la leva dell'operatore dopo un
+  //    guasto del fornitore.
+  richieste.clear();
+  await tick(segreto, true);
+  ok('con «forza» la richiesta parte lo stesso',
+     (richieste.get(`voti:${GIORNATA}`) ?? 0) === 1,
+     `letture di /voti: ${richieste.get(`voti:${GIORNATA}`) ?? 0}`);
+
   // 3. Giornata completa. UN SOLO giro non basta: la politica chiede due
   //    letture consecutive identiche, cioe' la prova che i voti si sono
   //    fermati. Pubblicare alla prima lettura completa significherebbe uscire
   //    mentre l'ultimo posticipo sta ancora aggiornando i voti.
   completa = true;
-  const primoCompleto = await tick(segreto);
+  const primoCompleto = await tick(segreto, true);
   const esitoPrimo = await primoCompleto.json() as {
     esiti: { leagueId: string; azione: string; motivo: string }[];
   };
@@ -222,7 +252,7 @@ async function main(): Promise<void> {
   // 4. Seconda lettura identica: adesso esce, e le tre leghe leggono la Serie
   //    A UNA volta sola.
   richieste.clear();
-  const pieno = await tick(segreto);
+  const pieno = await tick(segreto, true);
   const esitoPieno = await pieno.json() as {
     esiti: { leagueId: string; azione: string; motivo: string; confidenza?: number }[];
     lettureGlobali: number;
@@ -263,7 +293,7 @@ async function main(): Promise<void> {
   //    rigenerato la giornata 1 — quindi si verifica sia dove e' andato il
   //    tick, sia che il giornale gia' uscito sia rimasto quello di prima.
   const primaVersione = await (await fetch(`${base}/g/${leghe[0]!.publicSlug}/${GIORNATA}`)).text();
-  const ripasso = await tick(segreto);
+  const ripasso = await tick(segreto, true);
   const esitoRipasso = await ripasso.json() as {
     esiti: { leagueId: string; azione: string; matchday: number }[];
   };

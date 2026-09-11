@@ -40,6 +40,16 @@ export function creaFonteGiornata(opzioni: OpzioniFonteGiornata): FonteGiornata 
 
   return {
     /**
+     * Cio' che sappiamo senza spendere una richiesta: solo lo store.
+     *
+     * E' la meta' economica del mestiere di questa fonte. L'altra, qui sotto,
+     * costa una chiamata al servizio.
+     */
+    async storiche(matchday: number): Promise<readonly Observation[]> {
+      return store.getOsservazioni(season, matchday);
+    },
+
+    /**
      * Legge il piano globale e registra cio' che ha visto.
      *
      * Il valore restituito include l'osservazione appena presa, perche' la

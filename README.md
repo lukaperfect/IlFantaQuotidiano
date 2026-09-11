@@ -419,17 +419,75 @@ consumo e puo' far girare la pipeline su tutte le leghe collegate. Lasciato
 aperto non sarebbe una fuga di dati, sarebbe una fattura. Senza segreto
 configurato l'endpoint e' chiuso, non aperto.
 
+### Scegliere un fornitore: cosa danno davvero e cosa no
+
+**Nessuna API di statistiche sportive vende il VOTO del fantacalcio.** E' la
+cosa da sapere prima di tutto, perche' cambia a cosa serve il fornitore.
+
+Il fantavoto e' `voto + bonus/malus`. I bonus e i malus si ricavano dagli
+EVENTI — gol, assist, cartellini, rigori — e quelli sono cronaca: un servizio
+di statistiche li ha tutti. Il *voto* no: e' un giudizio redazionale di una
+testata (Gazzetta, Corriere, Tuttosport, Fantacalcio.it), cioe' un'opinione,
+non un fatto. Non lo vende un fornitore di dati perche' non e' suo.
+
+Conseguenza concreta, e il sistema la applica gia' da solo: senza il voto i
+punteggi della lega non si possono ricalcolare, la riconciliazione non
+combacerebbe entro 0.01, e ogni edizione finirebbe in revisione invece di
+uscire. L'architettura rifiuterebbe — correttamente — di pubblicare numeri che
+non tornano.
+
+Quindi la divisione giusta e' questa, ed e' esattamente quella che `piano`
+sugli endpoint permette:
+
+| Cosa | Da dove | Perche' |
+|---|---|---|
+| Voti, formazioni, calendario della lega | **Estensione** | Sono dati privati della lega dell'utente: nessun terzo li ha. Il voto lo mostra la piattaforma, che e' l'unica a saperlo |
+| «La giornata e' finita?» | **API gratuita** | Una chiamata piccola con lo stato delle partite e' una risposta diretta, mentre oggi il sistema lo DEDUCE dai voti |
+| Risultati e marcatori di Serie A | **API gratuita** | Alimentano il contesto del giornale, e fanno da riscontro indipendente contro una deriva della piattaforma |
+
+Sul tetto del tier gratuito, misurato su un fine settimana di Serie A
+(sabato → lunedi', posticipo compreso):
+
+| Cron ogni | Senza rispettare l'attesa | Rispettandola |
+|---|---|---|
+| 5 min | 288 richieste/giorno | 30/giorno |
+| 10 min | 144/giorno | 27/giorno |
+| 15 min | 96/giorno | 28/giorno |
+
+La giornata risulta pronta con **sei minuti** di differenza fra le due colonne.
+Con un tetto di 100 richieste al giorno, rispettare l'attesa e' la differenza
+fra funzionare e non funzionare — e `recheckAfterSeconds` esisteva gia', era
+solo che non lo guardava nessuno.
+
+Da qui la preferenza: un servizio con un limite **al minuto** invece che al
+giorno e' molto piu' comodo per questo uso, perche' il costo e' una chiamata
+per passata e le passate sono poche.
+
+### Scrivere un profilo senza indovinare
+
+I nomi dei campi sono l'unica parte di un profilo che non si puo' scrivere a
+tavolino. `ispeziona-fonte.ts` si punta a un endpoint vero con la propria
+chiave e dice dov'e' l'elenco dentro la risposta, che campi hanno gli elementi
+e quale mappatura ne verrebbe fuori:
+
+    pnpm exec tsx apps/worker/src/scripts/ispeziona-fonte.ts \
+      --url "https://api.esempio.org/v4/competitions/SA/matches?matchday=1" \
+      --header "X-Auth-Token: LA_TUA_CHIAVE"
+
+Segnala le ambiguita' invece di scioglierle: su un payload di prova propone
+`vote ← stats.voto | stats.fantavoto`, che sono due cose diverse, e lascia
+scegliere. Un accoppiamento automatico su un nome somigliante e' il modo piu'
+rapido di mappare il campo sbagliato senza accorgersene. La chiave non viene
+mai stampata, nemmeno dentro l'URL in caso di errore.
+
 ## Cosa manca
 
 Per andare in produzione servono, nell'ordine:
 
-1. **Un fornitore vero per il piano globale.** La catena HTTP c'e' ed e'
-   verificata end-to-end contro un servizio finto; quello che manca e' un
-   profilo puntato su un servizio reale, con la sua chiave — ed e'
-   esattamente la parte progettata per essere un dato. Da valutare prima:
-   se quel servizio dia il *voto* del fantacalcio o solo gli eventi.
-   Per il piano della lega non esiste un'API terza, e non puo' esistere:
-   quei dati stanno dentro la lega privata dell'utente.
+1. **Una chiave per un fornitore del piano globale.** La catena HTTP c'e' ed e'
+   verificata end-to-end; manca un profilo puntato su un servizio reale, che e'
+   configurazione, non codice. Da fare con `ispeziona-fonte.ts` e una chiave.
+   Nessuno di quei servizi da' il *voto*: quello resta all'estensione.
 2. **Un provider di posta vero**: il `Mailer` è un'interfaccia con
    implementazioni su console e su file. Serve collegarci un servizio prima di
    far accedere qualcuno che non sia sulla stessa macchina.

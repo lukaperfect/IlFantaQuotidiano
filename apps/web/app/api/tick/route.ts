@@ -56,6 +56,14 @@ export async function POST(req: Request): Promise<Response> {
     });
   }
 
+  /**
+   * `?forza=1` — ricontrolla adesso, senza aspettare l'intervallo che la
+   * macchina a stati aveva chiesto. E' per l'operatore dopo un guasto del
+   * fornitore, e costa richieste: per questo sta dietro lo stesso segreto e
+   * non e' il comportamento predefinito.
+   */
+  const forza = new URL(req.url).searchParams.get('forza') === '1';
+
   const leghe = await store.legheDaConsegnare();
   if (leghe.length === 0) {
     return Response.json(
@@ -110,6 +118,7 @@ export async function POST(req: Request): Promise<Response> {
         // finita» da «voti ancora in arrivo», e su questo percorso non la
         // guarda nessun umano prima della pubblicazione.
         policy: POLITICA_CRON,
+        ignoraAttesa: forza,
         driver: driver(),
         fallback: new TemplateDriver(),
       });

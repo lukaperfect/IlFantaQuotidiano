@@ -215,3 +215,83 @@ describe('tick di consegna', () => {
     expect(riga).toMatch(/pubblicate 1/);
   });
 });
+
+describe('il costo delle richieste', () => {
+  /**
+   * IL TETTO DI UN TIER GRATUITO E' LA VERA COSTRIZIONE.
+   *
+   * Misurato su un fine settimana di Serie A: un cron ogni dieci minuti che
+   * interroga il servizio a ogni passata costa 144 richieste al giorno, contro
+   * le 100 che un tier gratuito concede. Rispettando l'attesa che la macchina
+   * a stati gia' calcolava — e che nessuno guardava — ne costa 27, e la
+   * giornata risulta pronta sei minuti dopo.
+   */
+  function fonteConStoria(storia: Observation[]): FonteGiornata & { chiamate: number } {
+    const f = {
+      chiamate: 0,
+      async storiche() { return storia; },
+      async osservazioni() { f.chiamate++; return storia; },
+      async materiale() { return null; },
+    };
+    return f;
+  }
+
+  const parziale = (fetchedAt: string): Observation => ({
+    fetchedAt, contentHash: 'x',
+    // Una partita ancora da giocare: la macchina a stati chiede di riprovare
+    // fra un'ora.
+    matchesFinished: 9, matchesTotal: 10,
+    playersRated: 180, playersExpected: 220,
+  });
+
+  it('non interroga la fonte se e\'  troppo presto per riprovare', async () => {
+    const fonte = fonteConStoria([parziale('2026-01-11T12:00:00.000Z')]);
+    const esito = await tickConsegne({
+      store: new InMemoryLeagueStore(),
+      fonte,
+      leghe: [lega()],
+      now: new Date('2026-01-11T12:10:00.000Z'), // dieci minuti dopo
+    });
+    expect(fonte.chiamate).toBe(0);
+    expect(esito.esiti[0]?.azione).toBe('attesa-giornata');
+    expect(esito.esiti[0]?.motivo).toMatch(/riprovo fra \d+ minuti/i);
+  });
+
+  it('interroga la fonte quando l\'attesa e\' scaduta', async () => {
+    const fonte = fonteConStoria([parziale('2026-01-11T12:00:00.000Z')]);
+    await tickConsegne({
+      store: new InMemoryLeagueStore(),
+      fonte,
+      leghe: [lega()],
+      now: new Date('2026-01-11T13:30:00.000Z'), // un'ora e mezza dopo
+    });
+    expect(fonte.chiamate).toBe(1);
+  });
+
+  it('senza niente in archivio chiede, come prima', async () => {
+    const fonte = fonteConStoria([]);
+    await tickConsegne({
+      store: new InMemoryLeagueStore(),
+      fonte,
+      leghe: [lega()],
+      now: new Date('2026-01-11T12:10:00.000Z'),
+    });
+    expect(fonte.chiamate).toBe(1);
+  });
+
+  it('dieci leghe sulla stessa giornata leggono l\'archivio una volta sola', async () => {
+    let storicheChieste = 0;
+    const fonte: FonteGiornata = {
+      async storiche() { storicheChieste++; return [parziale('2026-01-11T12:00:00.000Z')]; },
+      async osservazioni() { return []; },
+      async materiale() { return null; },
+    };
+    await tickConsegne({
+      store: new InMemoryLeagueStore(),
+      fonte,
+      leghe: Array.from({ length: 10 }, (_, i) => lega({ leagueId: `l-${i}` })),
+      now: new Date('2026-01-11T12:10:00.000Z'),
+    });
+    expect(storicheChieste).toBe(1);
+  });
+});

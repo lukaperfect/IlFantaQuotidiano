@@ -37,6 +37,20 @@ export type FonteGiornata = {
    */
   osservazioni(matchday: number): Promise<readonly Observation[]>;
   /**
+   * Cio' che gia' sappiamo della giornata, SENZA chiedere niente a nessuno.
+   *
+   * Esiste per una ragione sola, e non e' l'eleganza: un tier gratuito ha un
+   * tetto. Misurato su un fine settimana vero di Serie A, un cron ogni dieci
+   * minuti che interroga il servizio a ogni passata costa 144 richieste al
+   * giorno; rispettando l'attesa che la macchina a stati gia' calcola ne costa
+   * 27, e la giornata risulta pronta sei minuti dopo. Con un tetto di cento al
+   * giorno la differenza e' fra funzionare e non funzionare.
+   *
+   * Facoltativa: una fonte che non sa rispondere lascia che le si chieda
+   * sempre, cioe' il comportamento di prima.
+   */
+  storiche?(matchday: number): Promise<readonly Observation[]>;
+  /**
    * Il materiale della lega per quella giornata, quando c'è. `null` significa
    * "questa lega non ha ancora i suoi dati" — non è un errore: una lega può
    * non aver ancora schierato o non essere collegata.
@@ -74,6 +88,16 @@ export type TickInput = {
   policy?: ReadinessPolicy;
   driver?: LlmDriver;
   fallback?: LlmDriver;
+  /**
+   * Salta l'attesa fra una richiesta e l'altra e interroga comunque la fonte.
+   *
+   * Serve a un operatore: «il fornitore aveva un guasto, adesso ricontrolla»
+   * senza aspettare l'ora che la macchina a stati aveva chiesto. NON salta
+   * nessun controllo di correttezza — la giornata resta soggetta agli stessi
+   * cancelli — salta solo una cortesia verso il servizio e il proprio tetto di
+   * richieste.
+   */
+  ignoraAttesa?: boolean;
 };
 
 export type TickOutput = {
@@ -101,6 +125,16 @@ export async function tickConsegne(input: TickInput): Promise<TickOutput> {
    */
   const cache = new Map<number, readonly Observation[]>();
   let lettureGlobali = 0;
+  /** Anche le storiche si leggono una volta per giornata, non una per lega. */
+  const cacheStoriche = new Map<number, readonly Observation[]>();
+  const storicheDi = async (matchday: number): Promise<readonly Observation[]> => {
+    const gia = cacheStoriche.get(matchday);
+    if (gia) return gia;
+    const lette = (await input.fonte.storiche?.(matchday)) ?? [];
+    cacheStoriche.set(matchday, lette);
+    return lette;
+  };
+
   const osservazioniDi = async (matchday: number): Promise<readonly Observation[]> => {
     const gia = cache.get(matchday);
     if (gia) return gia;
@@ -122,10 +156,43 @@ export async function tickConsegne(input: TickInput): Promise<TickOutput> {
         continue;
       }
 
-      const decisione = evaluateReadiness(
-        await osservazioniDi(matchday),
-        input.policy ?? DEFAULT_POLICY,
-      );
+      /**
+       * PRIMA DI CHIEDERE, SI GUARDA COSA SI SA GIA'.
+       *
+       * `recheckAfterSeconds` esisteva da sempre: la macchina a stati lo
+       * calcolava in quattro punti, il relay lo riportava nella risposta, un
+       * test lo asseriva. E poi NESSUNO lo guardava — il pianificatore
+       * interrogava la fonte a ogni passata comunque. E' la stessa famiglia di
+       * difetto della soglia di revisione: un valore calcolato dappertutto e
+       * applicato da nessuna parte, invisibile finche' non arriva il primo
+       * fornitore con un tetto.
+       */
+      const gia = await storicheDi(matchday);
+      let decisione = gia.length > 0
+        ? evaluateReadiness(gia, input.policy ?? DEFAULT_POLICY)
+        : null;
+
+      if (decisione !== null && !decisione.ready) {
+        const ultima = Date.parse(gia[gia.length - 1]!.fetchedAt);
+        const prossima = ultima + decisione.recheckAfterSeconds * 1000;
+        if (!input.ignoraAttesa && Number.isFinite(ultima) && now.getTime() < prossima) {
+          const fra = Math.ceil((prossima - now.getTime()) / 60000);
+          esiti.push({
+            ...base, azione: 'attesa-giornata',
+            motivo: `${decisione.reason} Troppo presto per richiedere: riprovo fra ${fra} minuti.`,
+          });
+          continue;
+        }
+      }
+
+      // Qui si paga la richiesta: o non sappiamo niente, o l'attesa e' scaduta.
+      if (decisione === null || !decisione.ready || input.ignoraAttesa) {
+        decisione = evaluateReadiness(
+          await osservazioniDi(matchday),
+          input.policy ?? DEFAULT_POLICY,
+        );
+      }
+
       if (!decisione.ready) {
         esiti.push({ ...base, azione: 'attesa-giornata', motivo: decisione.reason });
         continue;
