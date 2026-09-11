@@ -19,10 +19,30 @@ export const MODELS = {
  * L'apertura è il pezzo che la gente fotografa e incolla nel gruppo: lì la
  * qualità È il prodotto. Le rubriche sono micro-testi ad alto volume.
  */
+/**
+ * IL ROUTING E' UNA DECISIONE DI PREZZO, NON DI GUSTO.
+ *
+ * Misurato sui prompt veri (8 pezzi, prefisso di sistema 1095 token, 2601 di
+ * input, ~3200 di uscita) e sul listino, per una lega a 4,99€ con due edizioni
+ * a settimana per 38 giornate — 76 edizioni:
+ *
+ *   tutto opus                   3,77€/stagione   →  IN PERDITA
+ *   sonnet tranne le rubriche    1,41€/stagione   →  72% di margine
+ *   tutto haiku                  0,75€/stagione   →  85% di margine
+ *
+ * Opus e' fuori: da solo si mangia il ricavo. Fra le altre due la differenza e'
+ * 0,66€ per lega a stagione, e non vale la pena risparmiarla sui pezzi che la
+ * gente legge davvero — la promessa del prodotto e' «goliardici ma scritti
+ * molto bene». Le rubriche sono pezzi corti di contorno: li' Haiku basta.
+ *
+ * Le cifre valgono con il prefisso cachato e le richieste in batch. Senza
+ * batch raddoppiano e il margine resta comunque sopra il 40%: il batch e' una
+ * comodita', non il perno del modello di costo.
+ */
 export const DEFAULT_ROUTING: Record<Slot, string> = {
-  apertura: MODELS.opus,
-  spalla: MODELS.opus,
-  serie_a: MODELS.opus,
+  apertura: MODELS.sonnet,
+  spalla: MODELS.sonnet,
+  serie_a: MODELS.sonnet,
   interno: MODELS.sonnet,
   taglio_basso: MODELS.sonnet,
   rubrica: MODELS.haiku,

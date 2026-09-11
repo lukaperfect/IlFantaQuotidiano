@@ -202,8 +202,10 @@ describe('assemblaggio della richiesta', () => {
     expect(opus.thinking?.type).toBe('adaptive');
   });
 
-  it('instrada l’apertura sul modello migliore e le rubriche sul più economico', () => {
-    expect(DEFAULT_ROUTING.apertura).toBe(MODELS.opus);
+  it('instrada i pezzi di testa sul modello buono e le rubriche sul più economico', () => {
+    // Era Opus, ed è cambiato per una ragione di prezzo, non di stile: vedi
+    // il test «non usa Opus per difetto» più sotto, dove c'è il conto.
+    expect(DEFAULT_ROUTING.apertura).toBe(MODELS.sonnet);
     expect(DEFAULT_ROUTING.rubrica).toBe(MODELS.haiku);
   });
 });
@@ -408,5 +410,31 @@ describe('guardia anti-ripetizione nel giornale', () => {
     const res = await generateEdition(options({ driver: new Ripetitivo() }));
     const dopoIlPrimo = res.outcomes.slice(1);
     expect(dopoIlPrimo.some((o) => o.repetition.ripetuto)).toBe(true);
+  });
+});
+
+describe('il routing dei modelli', () => {
+  /**
+   * QUESTO TEST DIFENDE UN PREZZO, NON UNO STILE.
+   *
+   * A 4,99€ per lega con due edizioni a settimana per 38 giornate, Opus costa
+   * 3,77€ di token a stagione: da solo si mangia tre quarti del ricavo, e con
+   * i costi di tutto il resto va in perdita. Il conto e' misurato sui prompt
+   * veri, non stimato.
+   *
+   * Rimetterlo nel routing e' il tipo di modifica che sembra un miglioramento
+   * — «usiamo il modello migliore per l'apertura» — e che nessuno collega al
+   * conto economico finche' non arriva la fattura. Questo test e' il posto in
+   * cui quella connessione e' scritta.
+   */
+  it('non usa Opus per difetto: a 4,99€ non ci sta', () => {
+    for (const [slot, modello] of Object.entries(DEFAULT_ROUTING)) {
+      expect(modello, `slot ${slot}`).not.toMatch(/opus/i);
+    }
+  });
+
+  it('copre tutti gli slot: uno scoperto resterebbe senza modello', () => {
+    const slot = ['apertura', 'spalla', 'serie_a', 'interno', 'taglio_basso', 'rubrica'];
+    for (const s of slot) expect(DEFAULT_ROUTING[s as keyof typeof DEFAULT_ROUTING]).toBeTruthy();
   });
 });
