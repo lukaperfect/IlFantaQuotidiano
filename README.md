@@ -8,8 +8,7 @@ lega di fantacalcio, a partire dai dati ufficiali della giornata.
 > rose e ha subito il primo numero; collegata la fonte, le edizioni escono da
 > sole. Escono in **due tipi**: la *vigilia* la mattina in cui si comincia a
 > giocare e il *retrospettivo* la mattina dopo l'ultima partita. Manca il
-> pagamento e la pianificazione delle due uscite sugli orari veri di Serie A:
-> vedi [Cosa manca](#cosa-manca).
+> pagamento: vedi [Cosa manca](#cosa-manca).
 
 ## La tesi architetturale
 
@@ -358,6 +357,55 @@ giornale con piu' o meno dati dentro: sono due prodotti diversi.
 | Indirizzo | `/g/<slug>/<n>/vigilia` | `/g/<slug>/<n>` |
 | Mazzo dei format | 16 carte, 3 nate per la vigilia | 24 carte |
 
+### Quando escono: dal calendario, non dal giorno della settimana
+
+La Serie A gioca il venerdi' sera, il lunedi' sera, ha turni infrasettimanali e
+rinvii. Una giornata puo' cominciare venerdi' e finire lunedi', oppure stare
+tutta dentro un mercoledi'. **Un cron fissato al martedi' pubblica giornali
+sbagliati con puntualita' svizzera** — ed e' esattamente la premessa che
+sopravviveva nel pianificatore come «finestra di consegna».
+
+Adesso le due uscite discendono dagli orari veri delle partite, che sono un
+fatto del piano globale: uguali per tutte le leghe, letti una volta per
+giornata come i voti.
+
+- **La vigilia** apre alle 08:00 del giorno della PRIMA partita e **chiude al
+  primo fischio**. Il limite superiore non e' una cortesia: un numero di
+  vigilia pubblicato a partite gia' cominciate annuncia come «in programma» una
+  cosa che si sta giocando. Meglio saltare un numero che stamparne uno che si
+  contraddice — e il salto e' visibile nell'esito del tick, non silenzioso.
+- **Il retrospettivo** apre alle 08:00 del giorno DOPO l'ultima partita e non
+  chiude mai: una giornata pronta in ritardo si consegna comunque. Un
+  retrospettivo che arriva tardi e' ancora un giornale; una vigilia in ritardo
+  non e' piu' una vigilia.
+
+Quella finestra dice solo «non prima di». **Chi dice «adesso» resta la macchina
+a stati**: i voti devono essere stabili su due letture identiche consecutive. Le
+due condizioni si sommano, e quella sui dati non e' sostituibile con un
+orologio.
+
+Senza calendario non si blocca niente: si ricade sul comportamento precedente.
+Un orario mancante e' un'informazione che non abbiamo, non un divieto — se
+fermasse le uscite, un fornitore che smette di pubblicarlo spegnerebbe il
+prodotto per tutti senza un errore.
+
+#### Il fuso e' la parte che si sbaglia in silenzio
+
+«La mattina» vuol dire qualcosa solo in un fuso, e gli orari arrivano come
+istanti. Due trappole, entrambe coperte da test:
+
+1. **Una partita di lunedi' sera in ora legale e' del lunedi' a Roma e del
+   lunedi' in UTC — ma un posticipo che finisce dopo le 22:00 italiane scavalca
+   la mezzanotte UTC.** Contando in UTC il giornale sarebbe uscito con un
+   giorno di ritardo. L'ora locale si legge con `Intl.formatToParts`, non
+   formattando e riparsando una stringa: quel giro dipende dal formato di una
+   locale ed e' corretto finche' qualcuno non cambia runtime.
+2. **La conversione da ora da parete a istante richiede DUE passate.** Per
+   sapere quale scarto UTC vale bisogna gia' sapere di che istante si parla, e
+   nei giorni di cambio dell'ora la prima stima cade dal lato sbagliato.
+   Misurato: con una passata sola, le 01:30 del 29 marzo davano un istante che
+   a Roma sono le 00:30 — un'ora intera di errore, due volte l'anno.
+
 ### Il caso che governa il progetto
 
 La primissima edizione che un cliente pagante vede e' una vigilia di una lega
@@ -597,27 +645,22 @@ Per andare in produzione servono, nell'ordine:
    L'entitlement va sulla lega, non sull'account: chi paga per una lega non
    paga per tutte. Da qui `api.stripe.com` non e' raggiungibile, quindi si
    verifichera' contro un finto Stripe con firma del webhook vera.
-2. **La pianificazione delle due uscite** sugli orari veri di Serie A, non su
-   giorni fissi della settimana: la Serie A gioca anche il venerdi' e ha turni
-   infrasettimanali. La vigilia esce la mattina della prima partita, il
-   retrospettivo la mattina dopo l'ultima. Oggi la vigilia si fa uscire con un
-   comando dalla pagina della lega.
-3. **Una chiave per un fornitore del piano globale.** La catena HTTP c'e' ed e'
+2. **Una chiave per un fornitore del piano globale.** La catena HTTP c'e' ed e'
    verificata end-to-end; manca un profilo puntato su un servizio reale, che e'
    configurazione, non codice. Da fare con `ispeziona-fonte.ts` e una chiave.
    Nessuno di quei servizi da' il *voto*: quello resta all'estensione.
-4. **Un provider di posta vero**: il `Mailer` è un'interfaccia con
+3. **Un provider di posta vero**: il `Mailer` è un'interfaccia con
    implementazioni su console e su file. Serve collegarci un servizio prima di
    far accedere qualcuno che non sia sulla stessa macchina.
-5. **Consegna**: bot Telegram per l'automazione, PWA con Web Share API per la
+4. **Consegna**: bot Telegram per l'automazione, PWA con Web Share API per la
    condivisione su WhatsApp (l'API di WhatsApp non scrive nei gruppi: qualsiasi
    piano che lo assuma è irrealizzabile).
-6. **Fonte xG** con licenza commerciale verificata.
-7. **Revisione umana al 100%** per le prime settimane: è così che si costruisce
+5. **Fonte xG** con licenza commerciale verificata.
+6. **Revisione umana al 100%** per le prime settimane: è così che si costruisce
    il dataset di stile, non un ripiego.
-8. **pgvector** per la memoria semantica anti-ripetizione: oggi il cooldown è
+7. **pgvector** per la memoria semantica anti-ripetizione: oggi il cooldown è
    per tipo di fatto e per format, non per similarità del testo generato.
-9. **Il driver Anthropic contro l'API vera**: il codice c'è e l'assemblaggio
+8. **Il driver Anthropic contro l'API vera**: il codice c'è e l'assemblaggio
    della richiesta è testato, ma finora ha girato solo il driver template.
 
 ## Licenza e dati

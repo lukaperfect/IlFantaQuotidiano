@@ -1,10 +1,13 @@
 import type { LeagueWeekSnapshot, SerieAMatchday } from '@fantacomics/core';
 import {
   evaluateReadiness, shouldDeliver, DEFAULT_DELIVERY, DEFAULT_POLICY,
-  type DeliveryWindow, type Observation, type ReadinessPolicy,
+  decidiUscita, USCITE_PREDEFINITE,
+  type CalendarioGiornata, type DeliveryWindow, type Observation, type OpzioniUscite,
+  type ReadinessPolicy,
 } from '@fantacomics/ingest';
 import type { LlmDriver } from '@fantacomics/llm';
-import { runMatchdayPipeline } from './pipeline.js';
+import { runMatchdayPipeline, runAnteprimaPipeline } from './pipeline.js';
+import type { SfidaInProgramma } from '@fantacomics/facts';
 import type { LeagueConfig, LeagueStore } from './store.js';
 
 /**
@@ -59,10 +62,29 @@ export type FonteGiornata = {
     config: LeagueConfig,
     matchday: number,
   ): Promise<{ serieA: SerieAMatchday; snapshot: LeagueWeekSnapshot } | null>;
+  /**
+   * GLI ORARI DI SERIE A DELLA GIORNATA. Piano globale: sono gli stessi per
+   * tutte le leghe, quindi si leggono una volta sola come i voti.
+   *
+   * Facoltativa. Una fonte che non li sa lascia decidere alla macchina a stati
+   * sui dati, che e' il comportamento di prima: un orario mancante e'
+   * un'informazione che non abbiamo, non un divieto.
+   */
+  calendario?(matchday: number): Promise<CalendarioGiornata | null>;
+  /**
+   * Gli ACCOPPIAMENTI della lega per quella giornata, senza il resto.
+   *
+   * Esiste separata da `materiale` perche' la vigilia ha bisogno solo di
+   * questi: chiedere il pacchetto completo significherebbe scaricare voti e
+   * formazioni di una giornata non ancora giocata, cioe' pagare quattro
+   * richieste per lega per ottenere righe vuote.
+   */
+  sfide?(config: LeagueConfig, matchday: number): Promise<readonly SfidaInProgramma[]>;
 };
 
 export type AzioneLega =
   | 'pubblicata'
+  | 'vigilia-pubblicata'
   | 'in-revisione'
   | 'attesa-dati'
   | 'attesa-giornata'
@@ -85,6 +107,8 @@ export type TickInput = {
   leghe: readonly LeagueConfig[];
   now?: Date;
   window?: DeliveryWindow;
+  /** Quando escono i due numeri: fuso e ora della mattina. */
+  uscite?: OpzioniUscite;
   policy?: ReadinessPolicy;
   driver?: LlmDriver;
   fallback?: LlmDriver;
@@ -135,6 +159,19 @@ export async function tickConsegne(input: TickInput): Promise<TickOutput> {
     return lette;
   };
 
+  /**
+   * Anche il calendario e' piano globale: una lettura per giornata, non per
+   * lega. E' la stessa tesi che vale per i voti, applicata al terzo dato che
+   * tutte le leghe condividono.
+   */
+  const cacheCalendario = new Map<number, CalendarioGiornata | null>();
+  const calendarioDi = async (matchday: number): Promise<CalendarioGiornata | null> => {
+    if (cacheCalendario.has(matchday)) return cacheCalendario.get(matchday) ?? null;
+    const letto = (await input.fonte.calendario?.(matchday)) ?? null;
+    cacheCalendario.set(matchday, letto);
+    return letto;
+  };
+
   const osservazioniDi = async (matchday: number): Promise<readonly Observation[]> => {
     const gia = cache.get(matchday);
     if (gia) return gia;
@@ -153,6 +190,35 @@ export async function tickConsegne(input: TickInput): Promise<TickOutput> {
       // ripubblica a ogni passata è peggio di un cron che non parte.
       if (await input.store.getEdition(config.leagueId, matchday)) {
         esiti.push({ ...base, azione: 'pubblicata', motivo: 'Edizione già presente: niente da fare.' });
+        continue;
+      }
+
+      /**
+       * QUALE DEI DUE NUMERI TOCCA, secondo il calendario vero.
+       *
+       * La premessa «ogni martedi'» era sbagliata e sopravviveva qui dentro
+       * come finestra di consegna: la Serie A gioca il venerdi' sera, il
+       * lunedi' sera, ha turni infrasettimanali e rinvii. Una giornata puo'
+       * cominciare venerdi' e finire lunedi', o stare tutta in un mercoledi'.
+       *
+       * Senza calendario si ricade sul comportamento precedente — decide la
+       * macchina a stati, con la vecchia finestra — invece di bloccare tutto:
+       * un fornitore che smette di pubblicare gli orari non deve poter
+       * spegnere il prodotto in silenzio.
+       */
+      const calendario = await calendarioDi(matchday);
+      const uscite = input.uscite ?? USCITE_PREDEFINITE;
+      const quando = calendario
+        ? decidiUscita(calendario, now, uscite)
+        : { uscita: 'retrospettivo' as const, motivo: 'Nessun calendario: decide la macchina a stati.', fraSecondi: 0 };
+
+      if (quando.uscita === 'nessuna') {
+        esiti.push({ ...base, azione: 'attesa-finestra', motivo: quando.motivo });
+        continue;
+      }
+
+      if (quando.uscita === 'vigilia') {
+        esiti.push(await tentaVigilia(input, config, matchday, base));
         continue;
       }
 
@@ -198,10 +264,20 @@ export async function tickConsegne(input: TickInput): Promise<TickOutput> {
         continue;
       }
 
-      const consegna = shouldDeliver(decisione, now, input.window ?? DEFAULT_DELIVERY);
-      if (!consegna.deliver) {
-        esiti.push({ ...base, azione: 'attesa-finestra', motivo: consegna.reason });
-        continue;
+      /**
+       * La vecchia finestra vale SOLO quando non c'e' un calendario.
+       *
+       * Con il calendario la decisione l'ha gia' presa `decidiUscita`, che sa
+       * quando e' finita davvero la giornata; applicare anche il martedi' fisso
+       * rimetterebbe dentro proprio la premessa che si sta togliendo, e un
+       * turno infrasettimanale finito il giovedi' aspetterebbe cinque giorni.
+       */
+      if (calendario === null) {
+        const consegna = shouldDeliver(decisione, now, input.window ?? DEFAULT_DELIVERY);
+        if (!consegna.deliver) {
+          esiti.push({ ...base, azione: 'attesa-finestra', motivo: consegna.reason });
+          continue;
+        }
       }
 
       const materiale = await input.fonte.materiale(config, matchday);
@@ -249,12 +325,78 @@ export async function tickConsegne(input: TickInput): Promise<TickOutput> {
   return { esiti, lettureGlobali, durataMs: Date.now() - inizio };
 }
 
+/**
+ * IL NUMERO DI VIGILIA, dentro il tick.
+ *
+ * Sta in una funzione a parte perche' non condivide NIENTE con il percorso del
+ * retrospettivo: non ci sono osservazioni da valutare, non c'e' una macchina a
+ * stati da interrogare e non c'e' niente da riconciliare. L'unica cosa che le
+ * serve e' la rosa, che l'admin ha caricato una volta a inizio stagione.
+ */
+async function tentaVigilia(
+  input: TickInput,
+  config: LeagueConfig,
+  matchday: number,
+  base: { leagueId: string; leagueName: string; matchday: number },
+): Promise<EsitoLega> {
+  // Idempotenza, sul SUO indirizzo: la vigilia e il retrospettivo della stessa
+  // giornata sono due edizioni, e la presenza di una non dice niente dell'altra.
+  if (await input.store.getEdition(config.leagueId, matchday, 'anteprima')) {
+    return { ...base, azione: 'pubblicata', motivo: 'Vigilia gia\' pubblicata: niente da fare.' };
+  }
+
+  const roster = await input.store.getRoster(config.leagueId);
+  if (!roster) {
+    return {
+      ...base, azione: 'attesa-dati',
+      motivo: 'Nessuna rosa caricata: la vigilia non ha materia di cui parlare.',
+    };
+  }
+
+  /**
+   * Gli accoppiamenti sono un di piu', non un requisito: alla prima giornata
+   * di una lega nuova il calendario di lega puo' non essere ancora arrivato, e
+   * l'asta da sola basta a fare un giornale. Se la fonte non sa rispondere si
+   * procede senza, invece di saltare il primo numero di un cliente che ha
+   * appena pagato.
+   */
+  let sfide: readonly SfidaInProgramma[] = [];
+  try {
+    sfide = (await input.fonte.sfide?.(config, matchday)) ?? [];
+  } catch {
+    sfide = [];
+  }
+
+  const esito = await runAnteprimaPipeline({
+    leagueId: config.leagueId,
+    leagueName: config.leagueName,
+    roster,
+    matchday,
+    fixtures: sfide,
+    store: input.store,
+    rulesetVersion: config.ruleset.version,
+    spice: config.spice,
+    ...(input.driver ? { driver: input.driver } : {}),
+    ...(input.fallback ? { fallback: input.fallback } : {}),
+  });
+
+  return {
+    ...base,
+    azione: esito.publishable ? 'vigilia-pubblicata' : 'in-revisione',
+    motivo: esito.publishable
+      ? `Vigilia pubblicata: ${esito.edition.articles.length} pezzi, ${sfide.length} sfide in programma.`
+      : `Confidenza ${esito.edition.meta.confidence}: la vigilia va in revisione.`,
+    confidenza: esito.edition.meta.confidence,
+  };
+}
+
 /** Righe leggibili per il log di un cron. */
 export function riassumiTick(out: TickOutput): string {
   const per = (a: AzioneLega): number => out.esiti.filter((e) => e.azione === a).length;
   return [
     `${out.esiti.length} leghe in ${out.durataMs}ms, ${out.lettureGlobali} letture della giornata globale`,
-    `pubblicate ${per('pubblicata')}, in revisione ${per('in-revisione')}, errori ${per('errore')}`,
+    `pubblicate ${per('pubblicata')} (di cui ${per('vigilia-pubblicata')} vigilie), `
+    + `in revisione ${per('in-revisione')}, errori ${per('errore')}`,
     `in attesa: ${per('attesa-giornata')} giornata, ${per('attesa-finestra')} finestra, ${per('attesa-dati')} dati`,
   ].join(' · ');
 }

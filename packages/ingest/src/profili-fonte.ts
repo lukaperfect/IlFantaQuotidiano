@@ -47,6 +47,13 @@ export function profiloServizioDiProva(baseUrl: string): ProfiloFonte {
     baseUrl,
     endpoints: {
       voti: { percorso: '/voti?giornata={matchday}', piano: 'globale' },
+      /**
+       * GLI ORARI DI SERIE A. Piano globale: sono gli stessi per tutte le
+       * leghe, ed e' da loro che discende QUANDO escono i due numeri della
+       * settimana. Facoltativo: senza, il pianificatore ricade sulla macchina
+       * a stati invece di non pubblicare piu' niente.
+       */
+      partite: { percorso: '/partite?giornata={matchday}', piano: 'globale', facoltativo: true },
       formazioni: {
         percorso: '/formazioni?lega={leagueExternalId}&g={matchday}', piano: 'lega',
       },
@@ -71,6 +78,11 @@ export function profiloServizioDiProva(baseUrl: string): ProfiloFonte {
           redCards: 'stats.espulsioni', goalsConceded: 'stats.golSubiti',
           xG: 'stats.xG', officialFantaVote: 'stats.fantavoto',
         },
+      },
+      partite: {
+        version: 1,
+        root: 'data.partite',
+        fields: { kickoff: 'inizio', homeTeam: 'casa', awayTeam: 'trasferta' },
       },
       formazioni: {
         version: 1,

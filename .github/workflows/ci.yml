@@ -182,11 +182,15 @@ jobs:
       - name: Relay autenticato
         run: pnpm exec tsx apps/worker/src/scripts/verifica-relay.ts
 
-      - name: Consegna automatica dal servizio
+      - name: Consegna automatica dal servizio, nei due numeri
         # Il percorso che nessun umano guarda: un servizio risponde, la
         # macchina a stati decide, il giornale esce da solo. Verifica anche
         # che una giornata a META' NON venga pubblicata — su questo percorso
         # non c'e' nessuno a fermarla.
+        #
+        # E copre entrambe le uscite: col calendario che dice «si comincia fra
+        # poche ore» il cron deve produrre una VIGILIA, senza far avanzare il
+        # puntatore delle giornate; con la giornata finita, il retrospettivo.
         run: pnpm exec tsx apps/worker/src/scripts/verifica-fonte.ts
 
       - name: Rose dal foglio della piattaforma, e primo numero

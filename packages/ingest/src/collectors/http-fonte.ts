@@ -385,6 +385,33 @@ export class FonteHttp {
     }
   }
 
+  /**
+   * UN SOLO endpoint, per nome.
+   *
+   * Serve a chi ha bisogno di una cosa sola e non del pacchetto: la vigilia
+   * vuole gli accoppiamenti della lega, il pianificatore vuole gli orari di
+   * Serie A. Chiedere `payloadCompleti` per ottenerne uno significherebbe
+   * scaricare voti e formazioni di una giornata non ancora giocata — quattro
+   * richieste per lega per ricevere righe vuote.
+   *
+   * La cache del piano globale vale anche qui: e' la stessa mappa, quindi una
+   * lettura degli orari per giornata e non una per lega.
+   */
+  async payloadDi(id: string, ctx: Contesto): Promise<unknown> {
+    const endpoint = this.profilo.endpoints[id];
+    if (endpoint === undefined) return undefined;
+
+    if (endpoint.piano === 'globale') {
+      const chiave = `${id}:${ctx.season}:${ctx.matchday}`;
+      const gia = this.cacheGlobale.get(chiave);
+      if (gia !== undefined) { this.diagnostica.riusi++; return gia; }
+      const corpo = await this.prova(id, endpoint, ctx);
+      if (corpo !== undefined) this.cacheGlobale.set(chiave, corpo);
+      return corpo;
+    }
+    return this.prova(id, endpoint, ctx);
+  }
+
   /** Tutti i payload della giornata per una lega: i due piani insieme. */
   async payloadCompleti(ctx: Contesto): Promise<Record<string, unknown>> {
     const globali = await this.payload('globale', ctx);

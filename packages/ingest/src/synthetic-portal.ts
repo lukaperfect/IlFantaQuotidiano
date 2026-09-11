@@ -120,12 +120,51 @@ export function payloadClassifica(snapshot: LeagueWeekSnapshot): PayloadPortale 
 }
 
 /** Tutti i payload, con le chiavi che il profilo di prova si aspetta. */
+/**
+ * GLI ORARI DI SERIE A DELLA GIORNATA, come li darebbe un servizio vero.
+ *
+ * `riferimento` e' l'istante attorno a cui si dispongono le partite, e va
+ * passato di proposito invece di prendere «adesso»: e' cio' che decide quale
+ * dei due numeri e' dovuto, quindi una verifica deve poterlo scegliere. Preso
+ * implicitamente dall'orologio, la stessa verifica darebbe esiti diversi a
+ * seconda dell'ora in cui gira — cioe' sarebbe verde di giorno e rossa la
+ * notte.
+ *
+ * Il valore predefinito mette la giornata INTERAMENTE nel passato — non solo
+ * il suo inizio. Ci ero cascato: con il riferimento a tre giorni fa e le
+ * partite sparse su tre giorni, l'ULTIMA cadeva esattamente adesso, e il
+ * retrospettivo non era ancora dovuto perche' esce la mattina dopo. Le
+ * verifiche del percorso retrospettivo passavano da verdi a rosse in blocco, e
+ * la causa non era nel pianificatore ma qui dentro.
+ */
+export function payloadPartite(
+  snapshot: LeagueWeekSnapshot,
+  riferimento: Date = new Date(Date.now() - 6 * 24 * 3600 * 1000),
+): Record<string, unknown> {
+  const base = riferimento.getTime();
+  const squadre = [...new Set(
+    snapshot.lineups.flatMap((l) => l.starters.map((s) => s.playerId.split('-')[0] ?? 'x')),
+  )];
+  // Una giornata sparsa su tre giorni, come una vera: venerdi', domenica,
+  // lunedi'. Gli accoppiamenti non contano, contano gli orari.
+  const quante = Math.max(2, Math.min(10, Math.ceil(squadre.length / 2)));
+  const partite = Array.from({ length: quante }, (_, i) => ({
+    inizio: new Date(base + Math.floor((i * 3) / Math.max(1, quante - 1)) * 24 * 3600 * 1000)
+      .toISOString(),
+    casa: `sa-${i * 2}`,
+    trasferta: `sa-${i * 2 + 1}`,
+  }));
+  return { data: { partite } };
+}
+
 export function payloadPortaleDiProva(
   serieA: SerieAMatchday,
   snapshot: LeagueWeekSnapshot,
+  opzioni: { riferimentoPartite?: Date } = {},
 ): Record<string, unknown> {
   return {
     voti: payloadVoti(serieA),
+    partite: payloadPartite(snapshot, opzioni.riferimentoPartite),
     formazioni: payloadFormazioni(snapshot),
     calendario: payloadCalendario(snapshot),
     rose: payloadRose(snapshot),

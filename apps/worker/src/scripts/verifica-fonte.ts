@@ -21,7 +21,7 @@ import pg from 'pg';
 import {
   PostgresLeagueStore, FileLeagueStore, type LeagueStore,
 } from '@fantacomics/pipeline';
-import { DEFAULT_RULESET, stableHash } from '@fantacomics/core';
+import { DEFAULT_RULESET, stableHash, type LeagueRoster } from '@fantacomics/core';
 import {
   generateWorld, withOfficialScores, payloadPortaleDiProva, stagioneDi,
 } from '@fantacomics/ingest';
@@ -49,18 +49,42 @@ function ok(nome: string, cond: boolean, extra = ''): void {
 const stagione = stagioneDi(new Date());
 
 /**
- * Una giornata diversa a ogni giro.
+ * UNA GIORNATA ANCORA VERGINE, scelta guardando l'archivio.
  *
  * Le osservazioni del piano globale sono di TUTTI — stagione piu' giornata,
- * non per lega — quindi restano li' dopo la verifica. Riusare sempre la
- * giornata 1 significherebbe che il secondo giro parte con la storia del
- * primo gia' in archivio: la prima lettura risulterebbe subito stabile e
- * l'asserzione piu' importante di tutte passerebbe a vuoto. E' successo.
+ * non per lega — quindi restano li' dopo la verifica. Ripartire da una
+ * giornata gia' usata significa trovarsi la storia del giro precedente gia' in
+ * archivio: la prima lettura risulta subito stabile, la macchina a stati
+ * dichiara pronta una giornata a meta' e l'asserzione piu' importante di tutte
+ * passa a vuoto.
+ *
+ * Prima qui c'era una giornata PSEUDOCASUALE, e non era una soluzione: con
+ * trenta valori possibili e qualche esecuzione locale la collisione arriva
+ * presto, e quando arriva la verifica fallisce in blocco con un messaggio che
+ * punta altrove. Chiedere all'archivio quale giornata e' libera e' esatto
+ * invece che probabile.
  */
-const GIORNATA = 1 + (Date.now() % 30);
+async function giornataLibera(): Promise<number> {
+  for (let n = 1; n <= 38; n++) {
+    if ((await store.getOsservazioni(stagione, n)).length === 0) return n;
+  }
+  /**
+   * In CI non capita mai — il database nasce con la verifica — ma in locale
+   * dopo qualche decina di giri si esauriscono. Il messaggio dice cosa fare
+   * invece di limitarsi a constatare: un errore che non indica l'uscita
+   * costringe chi legge a ricostruire da zero come funziona l'archivio.
+   */
+  throw new Error(
+    'Tutte le 38 giornate della stagione ' + stagione + ' hanno gia\' osservazioni in '
+    + 'archivio. Per ripulire:\n'
+    + '  su Postgres:  psql "$DATABASE_URL" -c "delete from serie_a_osservazioni"\n'
+    + '  su file:      rm -rf .data/osservazioni',
+  );
+}
 
-const mondoPieno = withOfficialScores(
-  generateWorld({ seed: 'fonte-verifica', teams: 8, matchday: GIORNATA }),
+let GIORNATA = 1;
+let mondoPieno = withOfficialScores(
+  generateWorld({ seed: 'fonte-verifica', teams: 8, matchday: 1 }),
   DEFAULT_RULESET,
 );
 
@@ -78,10 +102,50 @@ function aMeta(payload: Record<string, unknown>): Record<string, unknown> {
   return { ...payload, voti };
 }
 
-const payloadPieno = payloadPortaleDiProva(mondoPieno.serieA, mondoPieno.snapshot);
-const payloadMeta = aMeta(payloadPieno);
+let payloadPieno = payloadPortaleDiProva(mondoPieno.serieA, mondoPieno.snapshot);
+let payloadMeta = aMeta(payloadPieno);
 
 let completa = false;
+
+/**
+ * LA FASE DELLA VIGILIA.
+ *
+ * Il servizio serve orari di Serie A diversi a seconda della fase, perche' e'
+ * da quelli che discende quale dei due numeri e' dovuto. In fase di vigilia le
+ * partite cominciano fra poche ore: la finestra e' aperta. Fuori da quella
+ * fase sono di tre giorni fa, cioe' la posizione in cui tocca il
+ * retrospettivo — il percorso che il resto di questa verifica prova da sempre.
+ *
+ * Gli orari si costruiscono attorno ad «adesso» perche' qui decide l'orologio
+ * dell'app, e non gliene si puo' iniettare uno finto da fuori.
+ */
+let faseVigilia = false;
+
+function partiteDiOggi(): Record<string, unknown> {
+  const fra = (ore: number) => new Date(Date.now() + ore * 3600 * 1000).toISOString();
+  // Fra due e quattro ore: dopo l'ora di uscita del giornale e prima del primo
+  // fischio, che e' esattamente la finestra della vigilia.
+  return { data: { partite: [{ inizio: fra(2) }, { inizio: fra(4) }] } };
+}
+
+/** Rose minime ma valide: la vigilia non ha altra materia di cui parlare. */
+function roseDiProva(): LeagueRoster {
+  return {
+    season: stagioneDi(new Date()),
+    importedAt: new Date().toISOString(),
+    source: 'xlsx-rose',
+    teams: Array.from({ length: 4 }, (_, i) => ({
+      teamId: `t${i}`,
+      teamName: `Squadra ${i + 1}`,
+      players: Array.from({ length: 25 }, (_, j) => ({
+        playerId: `t${i}-p${j}`,
+        playerName: `Giocatore ${i}-${j}`,
+        role: (['P', 'D', 'C', 'A'] as const)[j % 4] ?? 'C',
+        purchasePrice: 1 + ((i * 13 + j * 7) % 80),
+      })),
+    })),
+  };
+}
 
 /**
  * Il conteggio e' per CHIAVE PRECISA — endpoint piu' giornata, endpoint piu'
@@ -112,7 +176,7 @@ function alzaServizio(): Promise<{ server: Server; baseUrl: string }> {
     richieste.set(chiave, (richieste.get(chiave) ?? 0) + 1);
 
     const sorgente = completa ? payloadPieno : payloadMeta;
-    const corpo = sorgente[nome];
+    const corpo = nome === 'partite' && faseVigilia ? partiteDiOggi() : sorgente[nome];
     if (corpo === undefined) { res.writeHead(404); res.end('non trovato'); return; }
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify(corpo));
@@ -147,6 +211,19 @@ async function main(): Promise<void> {
     console.error('Serve FANTACOMICS_CRON_SECRET, lo stesso che ha l’app.');
     process.exit(1);
   }
+
+  /**
+   * La giornata si sceglie PRIMA di alzare il servizio: da lei dipendono i
+   * payload che il servizio serve.
+   */
+  GIORNATA = await giornataLibera();
+  mondoPieno = withOfficialScores(
+    generateWorld({ seed: 'fonte-verifica', teams: 8, matchday: GIORNATA }),
+    DEFAULT_RULESET,
+  );
+  payloadPieno = payloadPortaleDiProva(mondoPieno.serieA, mondoPieno.snapshot);
+  payloadMeta = aMeta(payloadPieno);
+  console.log(`giornata libera scelta: ${GIORNATA}`);
 
   const { server, baseUrl } = await alzaServizio();
   console.log(`servizio finto su ${baseUrl}`);
@@ -306,6 +383,58 @@ async function main(): Promise<void> {
   ok('e il giornale gia\' uscito non viene rigenerato',
      primaVersione === secondaVersione && primaVersione.length > 0,
      `${primaVersione.length} byte contro ${secondaVersione.length}`);
+
+  /**
+   * 8. LA VIGILIA, dal cron, sopra HTTP vero.
+   *
+   * Fin qui si e' provato il retrospettivo. Questa parte prova l'altra meta':
+   * con le partite che cominciano fra poche ore il cron deve produrre un numero
+   * di VIGILIA, e deve farlo senza spendere una richiesta di voti — di una
+   * giornata non ancora giocata non servono a nessuno.
+   */
+  faseVigilia = true;
+  const legaVigilia = `vigilia-${marchio}`;
+  const slugVigilia = randomToken(18);
+  await store.saveConfig({
+    leagueId: legaVigilia,
+    ownerId: 'acc-verifica-fonte',
+    publicSlug: slugVigilia,
+    relaySecret: null,
+    leagueName: 'Lega della Vigilia',
+    ruleset: DEFAULT_RULESET,
+    spice: 2,
+    createdAt: new Date().toISOString(),
+    lastMatchday: null,
+    fonte: { profilo: 'servizio-di-prova', leagueExternalId: `ext-vigilia-${marchio}` },
+  });
+  await store.saveRoster(legaVigilia, roseDiProva());
+
+  richieste.clear();
+  const giroVigilia = await tick(segreto, true);
+  const esitoVigilia = await giroVigilia.json() as {
+    esiti: { leagueId: string; azione: string; motivo: string }[];
+  };
+  const mia = esitoVigilia.esiti.find((e) => e.leagueId === legaVigilia);
+  ok('con le partite in arrivo il cron produce la VIGILIA',
+     mia?.azione === 'vigilia-pubblicata', `${mia?.azione}: ${mia?.motivo ?? ''}`);
+
+  const edizioniVigilia = await store.listEditions(legaVigilia);
+  ok('e l\'edizione salvata e\' di tipo anteprima',
+     edizioniVigilia.length === 1 && edizioniVigilia[0]?.kind === 'anteprima',
+     JSON.stringify(edizioniVigilia));
+  ok('il puntatore NON avanza: il retrospettivo di quella giornata deve ancora uscire',
+     (await store.getConfigForOwner(legaVigilia, 'acc-verifica-fonte'))?.lastMatchday === null);
+
+  const letta = await fetch(`${base}/g/${slugVigilia}/1/vigilia`);
+  ok('il numero di vigilia e\' leggibile all\'indirizzo pubblico',
+     letta.status === 200, `status ${letta.status}`);
+  const paginaVigilia = await letta.text();
+  ok('e non annuncia risultati che non esistono',
+     !paginaVigilia.includes('Risultati') && paginaVigilia.includes('Vigilia'));
+
+  await tick(segreto, true);
+  ok('un secondo giro non ripubblica la vigilia',
+     (await store.listEditions(legaVigilia)).length === 1);
 
   server.close();
   await pool?.end();

@@ -3,6 +3,8 @@ import {
   FonteHttp, importaDaHttp, osservazioneDaGiornata, applyMapping,
   AdapterError, type Observation,
 } from '@fantacomics/ingest';
+import type { CalendarioGiornata } from '@fantacomics/ingest';
+import type { SfidaInProgramma } from '@fantacomics/facts';
 import type { FonteGiornata } from './scheduler.js';
 import type { LeagueConfig, LeagueStore } from './store.js';
 
@@ -151,6 +153,70 @@ export function creaFonteGiornata(opzioni: OpzioniFonteGiornata): FonteGiornata 
        */
       await store.appendOsservazione(season, matchday, osservazione);
       return store.getOsservazioni(season, matchday);
+    },
+
+    /**
+     * GLI ORARI DI SERIE A DELLA GIORNATA.
+     *
+     * Piano globale, quindi una lettura per giornata per tutte le leghe: la
+     * cache sta dentro `payloadDi`, la stessa che serve i voti.
+     *
+     * Un profilo che non dichiara l'endpoint restituisce `null` e il
+     * pianificatore ricade sulla macchina a stati. E' la degradazione giusta:
+     * senza orari non si sa QUANDO uscire, ma si sa ancora se i dati ci sono.
+     */
+    async calendario(matchday: number): Promise<CalendarioGiornata | null> {
+      const grezzo = await http.payloadDi('partite', { matchday, season });
+      if (grezzo === undefined) return null;
+
+      const mappatura = http.mappature.partite;
+      if (!mappatura) return null;
+
+      const righe = applyMapping(grezzo, mappatura);
+      const partite = righe
+        .map((r) => ({
+          kickoff: String(r.kickoff ?? ''),
+          ...(r.homeTeam === undefined ? {} : { homeTeam: String(r.homeTeam) }),
+          ...(r.awayTeam === undefined ? {} : { awayTeam: String(r.awayTeam) }),
+        }))
+        .filter((p) => p.kickoff !== '');
+
+      /**
+       * Un calendario senza NESSUN orario leggibile equivale a non averlo. Se
+       * si restituisse un calendario vuoto, `decidiUscita` non troverebbe
+       * finestre e non uscirebbe piu' niente — un guasto del fornitore
+       * diventerebbe un prodotto spento in silenzio.
+       */
+      if (partite.length === 0) return null;
+      return { matchday, partite };
+    },
+
+    /**
+     * Gli accoppiamenti della lega: solo quelli, per la vigilia.
+     *
+     * Riusa la mappatura `calendario` che gia' serve al retrospettivo. Non e'
+     * un risparmio di righe: e' la stessa garanzia che vale per tutto il resto
+     * — due letture parallele dello stesso payload divergono il giorno in cui
+     * la piattaforma sposta un campo, e ne accorgerebbe solo uno dei due.
+     */
+    async sfide(config: LeagueConfig, matchday: number): Promise<readonly SfidaInProgramma[]> {
+      const esterno = identificativoEsterno(config);
+      if (esterno === null) return [];
+
+      const grezzo = await http.payloadDi('calendario', {
+        matchday, season, leagueExternalId: esterno,
+      });
+      if (grezzo === undefined) return [];
+
+      const mappatura = http.mappature.calendario;
+      if (!mappatura) return [];
+
+      return applyMapping(grezzo, mappatura)
+        .map((r) => ({
+          homeTeamId: String(r.homeTeamId ?? ''),
+          awayTeamId: String(r.awayTeamId ?? ''),
+        }))
+        .filter((f) => f.homeTeamId !== '' && f.awayTeamId !== '');
     },
 
     /**

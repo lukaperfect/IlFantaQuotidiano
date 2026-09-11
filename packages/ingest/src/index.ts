@@ -13,3 +13,4 @@ export * from './xlsx.js';
 export * from './collectors/rose-xlsx.js';
 export * from './collectors/http-fonte.js';
 export * from './profili-fonte.js';
+export * from './calendario.js';
