@@ -45,6 +45,15 @@ export function profiloServizioDiProva(baseUrl: string): ProfiloFonte {
     fonte: 'servizio-di-prova',
     version: 1,
     baseUrl,
+    /**
+     * Il servizio di prova e' il MIO server, alzato dalla verifica stessa.
+     * Chiedergli il robots.txt sarebbe chiedere il permesso a me stesso, e
+     * aggiungerebbe una richiesta a ogni conteggio senza dire niente a
+     * nessuno. Lo si dichiara qui, esplicitamente, invece di dedurlo da
+     * qualche regola implicita: un profilo che non rispetta robots.txt deve
+     * dire perche'.
+     */
+    rispettaRobots: false,
     endpoints: {
       voti: { percorso: '/voti?giornata={matchday}', piano: 'globale' },
       /**
@@ -120,12 +129,75 @@ export function profiloServizioDiProva(baseUrl: string): ProfiloFonte {
 }
 
 /**
+ * I PROFILI CONFIGURATI, presi dall'ambiente.
+ *
+ * E' la promessa che questo file fa fin dalla prima riga — «in esercizio
+ * arrivano dal database e si correggono senza rilasciare niente» — e che
+ * finora non era mantenuta: `profiloFonte` conosceva solo il servizio di
+ * prova, quindi collegare una fonte vera richiedeva comunque un rilascio.
+ *
+ * Il formato e' un oggetto JSON da nome a profilo:
+ *
+ *     FANTACOMICS_PROFILI_FONTE='{"il-sito": { "fonte": "il-sito", ... }}'
+ *
+ * Si valida con lo STESSO schema dei profili interni, e un profilo malformato
+ * lancia qui — all'avvio, quando qualcuno sta guardando — invece di fallire
+ * alla prima giornata da consegnare.
+ */
+export function profiliDaAmbiente(
+  env: NodeJS.ProcessEnv = process.env,
+): Record<string, ProfiloFonte> {
+  const grezzo = env.FANTACOMICS_PROFILI_FONTE;
+  if (!grezzo) return {};
+
+  let letto: unknown;
+  try {
+    letto = JSON.parse(grezzo);
+  } catch (e) {
+    throw new Error(
+      'FANTACOMICS_PROFILI_FONTE non e\' JSON valido: '
+      + (e instanceof Error ? e.message : 'errore sconosciuto'),
+    );
+  }
+  if (letto === null || typeof letto !== 'object' || Array.isArray(letto)) {
+    throw new Error(
+      'FANTACOMICS_PROFILI_FONTE dev\'essere un oggetto da nome del profilo a profilo.',
+    );
+  }
+
+  const out: Record<string, ProfiloFonte> = {};
+  for (const [nome, valore] of Object.entries(letto as Record<string, unknown>)) {
+    const esito = ProfiloFonteSchema.safeParse(valore);
+    if (!esito.success) {
+      throw new Error(
+        `Il profilo di fonte "${nome}" non e' valido: `
+        + esito.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
+      );
+    }
+    out[nome] = esito.data;
+  }
+  return out;
+}
+
+/**
  * Risolve un profilo per nome.
+ *
+ * L'ordine e' CONFIGURAZIONE PRIMA, incorporati dopo: e' quello che permette di
+ * correggere un profilo in produzione senza aspettare un rilascio, ed e' anche
+ * quello che permette di sovrascrivere il servizio di prova quando serve.
  *
  * `null` invece di un'eccezione: una lega configurata su un profilo che non
  * esiste piu' non deve far cadere l'intero tick delle altre.
  */
-export function profiloFonte(nome: string, baseUrl: string | undefined): ProfiloFonte | null {
+export function profiloFonte(
+  nome: string,
+  baseUrl: string | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): ProfiloFonte | null {
+  const configurati = profiliDaAmbiente(env);
+  const dallAmbiente = configurati[nome];
+  if (dallAmbiente) return dallAmbiente;
+
   if (nome === 'servizio-di-prova' && baseUrl) return profiloServizioDiProva(baseUrl);
   return null;
 }

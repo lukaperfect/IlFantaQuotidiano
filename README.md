@@ -637,6 +637,90 @@ scegliere. Un accoppiamento automatico su un nome somigliante e' il modo piu'
 rapido di mappare il campo sbagliato senza accorgersene. La chiave non viene
 mai stampata, nemmeno dentro l'URL in caso di errore.
 
+## Leggere un sito invece di un'API
+
+Il *voto* del fantacalcio non e' un dato di cronaca: e' il giudizio redazionale
+di una testata, e non esiste un fornitore che lo venda come si vende un
+risultato. Finche' non c'e' un accordo, l'unica strada e' leggere il sito che lo
+pubblica — ed e' una decisione commerciale, con un rischio, presa da chi possiede
+il prodotto. Il codice la rende **il meno rischiosa possibile**, non la nasconde.
+
+### Ci si presenta
+
+Il profilo dichiara `identificazione`, e da li' esce uno `User-Agent` con
+prodotto, versione e un **contatto**:
+
+    FantaComics/1.0 (+https://fantacomics.it/bot)
+
+Non e' cortesia. Uno scraper anonimo e' quello che si prende il ban dell'IP e
+l'escalation; uno che dice chi e' e lascia un recapito si prende, al massimo, una
+mail — e una mail e' una conversazione, non una diffida. Costa un header.
+
+### robots.txt si rispetta, e disattivarlo e' un dato scritto
+
+`robots.txt` non e' vincolante quasi da nessuna parte, ma e' il segnale piu'
+chiaro di cosa il proprietario voglia ed e' il **primo fatto citato** quando una
+raccolta automatica finisce in discussione. Si legge una volta per host, si
+rispetta, e il controllo sta **prima** della richiesta: dopo sarebbe inutile,
+perche' la richiesta vietata l'avremmo gia' fatta e nei loro log ci sarebbe
+comunque.
+
+Il `Crawl-delay`, che non sta nella RFC ma lo scrivono in molti, e' una richiesta
+esplicita di rallentare: vince sulla nostra attesa minima.
+
+`rispettaRobots: false` esiste, sta **nel profilo** — cioe' e' un dato visibile e
+versionato — e un percorso vietato produce un errore che dice cosa fare: un
+accordo, un percorso diverso, o quella riga li'. Disattivarlo dev'essere una
+decisione scritta da qualche parte, non un comportamento predefinito che nessuno
+ha mai scelto.
+
+### Una lettura per giornata, non una per lega
+
+E' la tesi del progetto applicata a un sito. Dieci leghe che leggono i propri
+voti sono dieci richieste allo stesso indirizzo per la stessa pagina: il modo
+piu' rapido di farsi notare e bloccare. La cache del piano globale e' dentro
+l'oggetto fonte, e un test lo fissa — dieci leghe, **una richiesta, nove riusi**.
+
+Fra due richieste riuscite c'e' un freno. Il backoff dei tentativi esisteva gia'
+ma riguarda i *guasti*: fra due richieste andate a buon fine non c'era niente, e
+una raffica di richieste riuscite e' esattamente cio' che un sito vede come un
+attacco.
+
+### Il JSON sta dentro la pagina
+
+Una pagina di un sito moderno e' HTML, ma i dati che mostra quasi sempre
+viaggiano come JSON dentro quell'HTML: `__NEXT_DATA__`, un tag
+`application/json`, un'assegnazione a una variabile globale. Chi legge la pagina
+come testo conclude «non si puo' fare» mentre i dati erano li' sotto.
+
+`estrazione: "json-in-html"` sull'endpoint li tira fuori, e `bloccoHtml` dice
+**quale** blocco: il ripiego «il piu' grande» e' un'euristica, e il giorno in cui
+il sito aggiunge un blob di configurazione piu' grosso l'estrazione cambierebbe
+bersaglio in silenzio. Un id che non c'e' e' un errore, non un ripiego.
+
+L'ispettore (`ispeziona-fonte.ts`) usa la **stessa** funzione: due euristiche
+diverse direbbero «ho trovato» su un blocco che la fonte poi non prende. Stampa
+la riga di profilo pronta da incollare.
+
+### I profili arrivano dalla configurazione
+
+Era una promessa scritta nei commenti e non mantenuta: `profiloFonte` conosceva
+solo il servizio di prova, quindi collegare una fonte vera richiedeva comunque un
+rilascio. Ora `FANTACOMICS_PROFILI_FONTE` porta un oggetto JSON da nome a
+profilo, validato con lo **stesso** schema di quelli interni — e un profilo
+malformato lancia all'avvio, quando qualcuno sta guardando, invece di fallire
+alla prima giornata da consegnare di domenica sera.
+
+La configurazione vince sugli incorporati. Cambiare fonte e' una variabile
+d'ambiente.
+
+### Cosa resta da fare, e perche' non posso farlo io
+
+I **nomi dei campi** dentro le loro risposte. Inventarli produrrebbe codice che
+sembra pronto e fallisce al primo dato vero, ed e' esattamente l'errore contro
+cui e' costruito il resto del progetto. Si ricavano con `ispeziona-fonte.ts`
+eseguito da una macchina che quel sito lo raggiunge.
+
 ## Il pagamento
 
 4,99 € **una tantum per lega e per stagione**. Non un abbonamento: chi gioca al

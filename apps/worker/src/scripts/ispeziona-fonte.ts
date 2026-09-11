@@ -18,10 +18,23 @@
  * viene MAI stampata, nemmeno dentro l'URL in caso di errore.
  */
 
+import { scaricaRobots, consentito, jsonDentroHtml, scegliBlocco } from '@fantacomics/ingest';
+
 type Argomenti = { url: string; headers: Record<string, string>; profondita: number };
 
+/**
+ * Anche l'ispettore fa una richiesta al sito di qualcun altro, quindi si
+ * presenta come si presenta la fonte vera. Dimenticarlo qui significherebbe
+ * che la prima volta che quel sito ci vede siamo anonimi.
+ */
+const AGENTE = process.env.FANTACOMICS_USER_AGENT
+  ?? 'FantaComics/1.0 (+https://fantacomics.it/bot)';
+
 function leggiArgomenti(argv: string[]): Argomenti {
-  const headers: Record<string, string> = { accept: 'application/json' };
+  const headers: Record<string, string> = {
+    accept: 'application/json, text/html;q=0.9',
+    'user-agent': AGENTE,
+  };
   let url = '';
   let profondita = 3;
 
@@ -125,7 +138,32 @@ async function main(): Promise<void> {
   // L'host si stampa, la query no: puo' contenere la chiave.
   const soloHost = (() => { try { return new URL(url).origin + new URL(url).pathname; } catch { return '(url non valido)'; } })();
   console.log(`Interrogo ${soloHost}`);
-  console.log(`Intestazioni: ${Object.keys(headers).join(', ')}\n`);
+  console.log(`Mi presento come: ${AGENTE}`);
+  console.log(`Intestazioni: ${Object.keys(headers).join(', ')}`);
+
+  /**
+   * Si guarda il robots.txt PRIMA di chiedere, e lo si dice a schermo.
+   *
+   * Non blocca — questo e' uno strumento da riga di comando, usato da una
+   * persona che sa cosa sta facendo — ma quella persona deve saperlo adesso,
+   * non dopo aver costruito mezzo profilo.
+   */
+  try {
+    const origine = new URL(url).origin;
+    const robots = await scaricaRobots(origine, AGENTE);
+    const percorso = new URL(url).pathname;
+    console.log(
+      consentito(robots, percorso)
+        ? `robots.txt: consente ${percorso}`
+        : `robots.txt: NON consente ${percorso} — quel sito ha chiesto di non farlo.`,
+    );
+    if (robots.attesaSecondi !== null) {
+      console.log(`robots.txt: chiede ${robots.attesaSecondi}s fra una richiesta e l'altra.`);
+    }
+  } catch {
+    console.log('robots.txt: non leggibile.');
+  }
+  console.log();
 
   let risposta: Response;
   try {
@@ -150,9 +188,42 @@ async function main(): Promise<void> {
   try {
     corpo = JSON.parse(testo);
   } catch {
-    console.error('La risposta non e\' JSON. Primi 300 caratteri:\n');
-    console.error(testo.slice(0, 300));
-    process.exit(1);
+    /**
+     * NON E' UN VICOLO CIECO, ed e' il caso piu' probabile di tutti.
+     *
+     * Una pagina di un sito moderno e' HTML, ma i dati che mostra quasi sempre
+     * viaggiano come JSON dentro quell'HTML — `__NEXT_DATA__`, un tag
+     * `application/json`, o un `window.__QUALCOSA = {...}`. Prima qui lo
+     * script si limitava a stampare i primi trecento caratteri e uscire, che
+     * e' il momento in cui chi legge pensa «allora non si puo' fare» e invece
+     * i dati erano li' sotto.
+     */
+    console.log('La risposta non e\' JSON: e\' una pagina. Cerco il JSON dentro l\'HTML.\n');
+    const trovati = jsonDentroHtml(testo);
+    if (trovati.length === 0) {
+      console.log('   Nessun blocco JSON incorporato trovato.');
+      console.log('   Resta la strada piu\' affidabile: apri la pagina nel browser, scheda');
+      console.log('   Rete, filtra su Fetch/XHR e guarda quale indirizzo restituisce i voti.');
+      console.log('   Poi rilancia questo comando su QUELL\'indirizzo.\n');
+      console.log('Primi 300 caratteri di quello che e\' arrivato:\n');
+      console.log(testo.slice(0, 300));
+      process.exit(1);
+    }
+
+    console.log(`   ${trovati.length} blocchi JSON incorporati:\n`);
+    for (const t of trovati) {
+      console.log(`   ${t.dove.padEnd(34)} ${t.byte} byte`);
+    }
+    /**
+     * Si sceglie con la STESSA funzione che usera' la fonte quando leggera'
+     * davvero. Due euristiche diverse — una qui e una li' — direbbero «ho
+     * trovato» su un blocco che poi la fonte non prende.
+     */
+    const scelto = scegliBlocco(trovati)!;
+    console.log(`\n   Ispeziono: ${scelto.dove}`);
+    console.log('   Nel profilo: estrazione: "json-in-html"'
+      + (scelto.id ? `, bloccoHtml: "${scelto.id}"` : '') + '\n');
+    corpo = scelto.valore;
   }
 
   if (!risposta.ok) {

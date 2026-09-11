@@ -5,6 +5,8 @@ import {
   FonteHttp, importaDaHttp, riempi, ProfiloFonteSchema, type ProfiloFonte,
 } from './collectors/http-fonte.js';
 import { importFromRelay } from './collectors/relay-import.js';
+import { jsonDentroHtml, scegliBlocco } from './collectors/html-json.js';
+import { applyMapping } from './collectors/extension-relay.js';
 import { PROFILO_PROVA } from './profiles.js';
 import { DEFAULT_RULESET } from '@fantacomics/core';
 import { generateWorld, withOfficialScores } from './synthetic.js';
@@ -27,6 +29,10 @@ function profilo(baseUrl: string, over: Partial<ProfiloFonte> = {}): ProfiloFont
     fonte: 'servizio-di-prova',
     version: 1,
     baseUrl,
+    // Il servizio finto di questo file e' il nostro: niente robots.txt da
+    // chiedere, e nessuna attesa da rispettare fra una prova e l'altra.
+    rispettaRobots: false,
+    attesaMinimaMs: 0,
     endpoints: {
       voti: { percorso: '/voti?giornata={matchday}', piano: 'globale' },
       formazioni: { percorso: '/formazioni?lega={leagueExternalId}&g={matchday}', piano: 'lega' },
@@ -339,5 +345,313 @@ describe('i segnaposto nell\'URL', () => {
 
   it('non inventa segnaposto che non conosce', () => {
     expect(() => riempi('/x/{sconosciuto}', CTX)).toThrow(/sconosciuto/);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * Come ci si presenta a un sito che non ci ha invitato
+ * ------------------------------------------------------------------ */
+
+describe('identificazione e robots.txt', () => {
+  /** Un servizio finto che registra cosa gli viene chiesto e con che nome. */
+  function servizio(robotsTxt: string | null) {
+    const chiamate: { percorso: string; agente: string }[] = [];
+    const impl = (async (u: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(u));
+      const h = new Headers(init?.headers as Record<string, string>);
+      chiamate.push({ percorso: url.pathname, agente: h.get('user-agent') ?? '' });
+      if (url.pathname === '/robots.txt') {
+        return robotsTxt === null
+          ? new Response('no', { status: 404 })
+          : new Response(robotsTxt, { status: 200 });
+      }
+      return new Response(JSON.stringify(PAYLOAD.voti), { status: 200 });
+    }) as unknown as typeof fetch;
+    return { impl, chiamate };
+  }
+
+  const conIdentita = (baseUrl: string, over: Record<string, unknown> = {}) => ProfiloFonteSchema.parse({
+    fonte: 'sito-vero',
+    version: 1,
+    baseUrl,
+    identificazione: {
+      prodotto: 'FantaComics', versione: '1.0', contatto: 'https://fantacomics.it/bot',
+    },
+    attesaMinimaMs: 0,
+    endpoints: { voti: { percorso: '/voti?giornata={matchday}', piano: 'globale' } },
+    mappings: { voti: PROFILO_PROVA.mappings.voti },
+    ...over,
+  });
+
+  it('si presenta con prodotto, versione e un contatto', async () => {
+    /**
+     * Uno scraper anonimo e' quello che si prende il ban dell'IP; uno che dice
+     * chi e' e lascia un recapito si prende, al massimo, una mail. La
+     * differenza costa un header.
+     */
+    const { impl, chiamate } = servizio(null);
+    const fonte = new FonteHttp({ profilo: conIdentita('http://sito.test'), attesa: subito, fetchImpl: impl });
+    await fonte.payload('globale', CTX);
+
+    const suVoti = chiamate.find((c) => c.percorso === '/voti');
+    expect(suVoti?.agente).toBe('FantaComics/1.0 (+https://fantacomics.it/bot)');
+  });
+
+  it('chiede il robots.txt PRIMA di chiedere i dati', async () => {
+    const { impl, chiamate } = servizio('User-agent: *\nDisallow:\n');
+    const fonte = new FonteHttp({ profilo: conIdentita('http://sito.test'), attesa: subito, fetchImpl: impl });
+    await fonte.payload('globale', CTX);
+
+    expect(chiamate[0]?.percorso).toBe('/robots.txt');
+    expect(chiamate[1]?.percorso).toBe('/voti');
+  });
+
+  it('un percorso vietato NON viene chiesto affatto', async () => {
+    /**
+     * Il controllo sta prima della richiesta, non dopo: dopo sarebbe inutile —
+     * la richiesta vietata l'avremmo gia' fatta, e nei loro log ci sarebbe
+     * comunque.
+     */
+    const { impl, chiamate } = servizio('User-agent: *\nDisallow: /voti\n');
+    const fonte = new FonteHttp({ profilo: conIdentita('http://sito.test'), attesa: subito, fetchImpl: impl });
+
+    await expect(fonte.payload('globale', CTX)).rejects.toThrow(/robots\.txt/i);
+    expect(chiamate.some((c) => c.percorso === '/voti')).toBe(false);
+  });
+
+  it('e il messaggio dice cosa fare, non solo che e\' andata male', async () => {
+    const { impl } = servizio('User-agent: *\nDisallow: /voti\n');
+    const fonte = new FonteHttp({ profilo: conIdentita('http://sito.test'), attesa: subito, fetchImpl: impl });
+    try {
+      await fonte.payload('globale', CTX);
+      expect.unreachable('doveva rifiutare');
+    } catch (e) {
+      const m = (e as Error).message;
+      expect(m).toContain('accordo');
+      expect(m).toContain('rispettaRobots');
+    }
+  });
+
+  it('il robots.txt si legge UNA volta per host, non a ogni richiesta', async () => {
+    const { impl, chiamate } = servizio('User-agent: *\nDisallow:\n');
+    const fonte = new FonteHttp({
+      profilo: conIdentita('http://sito.test', {
+        endpoints: {
+          voti: { percorso: '/voti?giornata={matchday}', piano: 'globale' },
+          altro: { percorso: '/altro?giornata={matchday}', piano: 'globale' },
+        },
+        mappings: { voti: PROFILO_PROVA.mappings.voti },
+      }),
+      attesa: subito,
+      fetchImpl: impl,
+    });
+    await fonte.payload('globale', CTX);
+    await fonte.payload('globale', { ...CTX, matchday: 6 });
+
+    expect(chiamate.filter((c) => c.percorso === '/robots.txt')).toHaveLength(1);
+  });
+
+  it('un profilo che dichiara di NON rispettarlo non lo chiede nemmeno', async () => {
+    const { impl, chiamate } = servizio('User-agent: *\nDisallow: /voti\n');
+    const fonte = new FonteHttp({
+      profilo: conIdentita('http://sito.test', { rispettaRobots: false }),
+      attesa: subito,
+      fetchImpl: impl,
+    });
+    await fonte.payload('globale', CTX);
+
+    expect(chiamate.some((c) => c.percorso === '/robots.txt')).toBe(false);
+    expect(chiamate.some((c) => c.percorso === '/voti')).toBe(true);
+  });
+
+  it('il Crawl-delay che chiedono vince sulla nostra attesa minima', async () => {
+    const attese: number[] = [];
+    const { impl } = servizio('User-agent: *\nDisallow:\nCrawl-delay: 3\n');
+    const fonte = new FonteHttp({
+      profilo: conIdentita('http://sito.test', {
+        attesaMinimaMs: 100,
+        endpoints: {
+          voti: { percorso: '/voti?giornata={matchday}', piano: 'globale' },
+          altro: { percorso: '/altro?giornata={matchday}', piano: 'globale' },
+        },
+        mappings: { voti: PROFILO_PROVA.mappings.voti },
+      }),
+      // L'attesa si registra invece di dormire davvero: un test che dorme tre
+      // secondi e' un test che nessuno esegue volentieri.
+      attesa: async (ms: number) => { attese.push(ms); },
+      fetchImpl: impl,
+    });
+    await fonte.payload('globale', CTX);
+
+    // La prima richiesta non aspetta; la seconda sì, e per i 3 secondi loro.
+    expect(attese.some((ms) => ms > 2000)).toBe(true);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * Leggere un SITO invece di un'API
+ * ------------------------------------------------------------------ */
+
+describe('i voti presi da una pagina, una volta per tutti', () => {
+  /** Una pagina come la servirebbe un sito vero: dati dentro __NEXT_DATA__. */
+  const pagina = (voti: unknown) => `<!doctype html><html><head><title>Voti</title></head>
+<body><h1>Voti</h1>
+<script>var contatore = 0;</script>
+<script id="__NEXT_DATA__" type="application/json">${JSON.stringify({
+    props: { pageProps: { voti } },
+  })}</script>
+<script type="application/ld+json">{"@type":"WebPage"}</script>
+</body></html>`;
+
+  const VOTI = [
+    { id: 'p1', nome: 'Martinez L.', ruolo: 'A', squadra: 'Inter', stats: { voto: 7.5, minuti: 90 } },
+    { id: 'p2', nome: 'Sommer', ruolo: 'P', squadra: 'Inter', stats: { voto: 6, minuti: 90 } },
+  ];
+
+  function sito() {
+    const chiamate: string[] = [];
+    const impl = (async (u: string | URL | Request) => {
+      const url = new URL(String(u));
+      chiamate.push(url.pathname);
+      if (url.pathname === '/robots.txt') {
+        return new Response('User-agent: *\nDisallow: /privato\n', { status: 200 });
+      }
+      return new Response(pagina(VOTI), {
+        status: 200, headers: { 'content-type': 'text/html' },
+      });
+    }) as unknown as typeof fetch;
+    return { impl, chiamate };
+  }
+
+  /** Il profilo come lo scriverebbe chi ha appena eseguito ispeziona-fonte. */
+  const PROFILO_SITO = {
+    fonte: 'il-sito',
+    version: 1,
+    baseUrl: 'http://sito.test',
+    identificazione: {
+      prodotto: 'FantaComics', versione: '1.0', contatto: 'https://fantacomics.it/bot',
+    },
+    attesaMinimaMs: 0,
+    endpoints: {
+      voti: {
+        percorso: '/voti-fantacalcio-serie-a?g={matchday}',
+        piano: 'globale',
+        estrazione: 'json-in-html',
+        bloccoHtml: '__NEXT_DATA__',
+      },
+    },
+    mappings: {
+      voti: {
+        version: 1,
+        root: 'props.pageProps.voti',
+        fields: {
+          playerId: 'id', playerName: 'nome', role: 'ruolo', serieATeam: 'squadra',
+          vote: 'stats.voto', minutes: 'stats.minuti',
+        },
+      },
+    },
+  };
+
+  it('estrae i voti dal JSON dentro la pagina', async () => {
+    const { impl } = sito();
+    const fonte = new FonteHttp({
+      profilo: ProfiloFonteSchema.parse(PROFILO_SITO), attesa: subito, fetchImpl: impl,
+    });
+    const payloads = await fonte.payload('globale', CTX);
+    const righe = applyMapping(payloads.voti, fonte.mappature.voti!);
+
+    expect(righe).toHaveLength(2);
+    expect(righe[0]?.playerName).toBe('Martinez L.');
+    expect(righe[0]?.vote).toBe(7.5);
+  });
+
+  it('sceglie il blocco per ID, non il primo che capita', () => {
+    /**
+     * Una pagina ha piu' `<script>` con dentro JSON: dati strutturati per i
+     * motori di ricerca, configurazione, tracciamento. Prendere il primo
+     * significa prendere quello sbagliato appena il sito ne aggiunge uno.
+     */
+    const blocchi = jsonDentroHtml(pagina(VOTI));
+    expect(blocchi.length).toBeGreaterThanOrEqual(2);
+    const scelto = scegliBlocco(blocchi, '__NEXT_DATA__');
+    expect(scelto?.id).toBe('__NEXT_DATA__');
+  });
+
+  it('l\'id vince anche quando un ALTRO blocco e\' piu\' grande', () => {
+    /**
+     * E' il caso pericoloso, e non era coperto: finche' `__NEXT_DATA__` e'
+     * anche il piu' grosso, «scegli per id» e «scegli il piu' grosso» danno la
+     * stessa risposta e il test passa con l'implementazione sbagliata. Il
+     * giorno in cui il sito aggiunge un blob di configurazione o di
+     * tracciamento piu' grande, l'estrazione cambierebbe bersaglio in silenzio
+     * e il giornale uscirebbe con i dati di qualcun altro.
+     */
+    const conBlobGrosso = `<!doctype html><html><body>
+<script id="__NEXT_DATA__" type="application/json">${JSON.stringify({
+      props: { pageProps: { voti: VOTI } },
+    })}</script>
+<script id="config" type="application/json">${JSON.stringify({
+      riempimento: 'x'.repeat(5000),
+    })}</script>
+</body></html>`;
+
+    const blocchi = jsonDentroHtml(conBlobGrosso);
+    const piuGrande = scegliBlocco(blocchi);
+    expect(piuGrande?.id, 'il piu\' grande e\' il blob, non i dati').toBe('config');
+
+    const perId = scegliBlocco(blocchi, '__NEXT_DATA__');
+    expect(perId?.id).toBe('__NEXT_DATA__');
+  });
+
+  it('un id che non c\'e\' e\' un errore, non un ripiego silenzioso', () => {
+    // Ripiegare sul piu' grande quando l'id manca sarebbe il modo peggiore di
+    // sbagliare: nessun errore, dati di un altro blocco.
+    expect(scegliBlocco(jsonDentroHtml(pagina(VOTI)), 'non-esiste')).toBeNull();
+  });
+
+  it('UNA richiesta serve tutte le leghe della stessa giornata', async () => {
+    /**
+     * E' la tesi del progetto applicata a un sito: il 95% del volume e'
+     * identico per tutte le leghe. Dieci leghe che leggono i propri voti sono
+     * dieci richieste allo stesso indirizzo per la stessa pagina — il modo
+     * piu' rapido di farsi notare e bloccare.
+     */
+    const { impl, chiamate } = sito();
+    const fonte = new FonteHttp({
+      profilo: ProfiloFonteSchema.parse(PROFILO_SITO), attesa: subito, fetchImpl: impl,
+    });
+
+    for (let lega = 0; lega < 10; lega++) {
+      await fonte.payload('globale', { ...CTX, leagueExternalId: `lega-${lega}` });
+    }
+
+    expect(chiamate.filter((c) => c.startsWith('/voti'))).toHaveLength(1);
+    expect(fonte.stato.riusi).toBe(9);
+  });
+
+  it('e una giornata diversa e\' una richiesta diversa', async () => {
+    const { impl, chiamate } = sito();
+    const fonte = new FonteHttp({
+      profilo: ProfiloFonteSchema.parse(PROFILO_SITO), attesa: subito, fetchImpl: impl,
+    });
+    await fonte.payload('globale', { ...CTX, matchday: 5 });
+    await fonte.payload('globale', { ...CTX, matchday: 6 });
+    expect(chiamate.filter((c) => c.startsWith('/voti'))).toHaveLength(2);
+  });
+
+  it('se la pagina cambia forma lo dice, invece di restituire niente', async () => {
+    const impl = (async (u: string | URL | Request) => {
+      const url = new URL(String(u));
+      if (url.pathname === '/robots.txt') return new Response('', { status: 404 });
+      // Il sito ha rifatto la pagina e il blocco non si chiama piu' cosi'.
+      return new Response('<html><body>Nessun dato qui</body></html>', {
+        status: 200, headers: { 'content-type': 'text/html' },
+      });
+    }) as unknown as typeof fetch;
+
+    const fonte = new FonteHttp({
+      profilo: ProfiloFonteSchema.parse(PROFILO_SITO), attesa: subito, fetchImpl: impl,
+    });
+    await expect(fonte.payload('globale', CTX)).rejects.toThrow(/ispeziona-fonte/);
   });
 });

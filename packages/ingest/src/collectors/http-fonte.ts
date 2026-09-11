@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { AdapterError } from '../adapter.js';
 import { FieldMappingSchema } from './extension-relay.js';
+import { scaricaRobots, consentito, type Robots } from './robots.js';
+import { jsonDentroHtml, scegliBlocco } from './html-json.js';
 import { importFromRelay } from './relay-import.js';
 
 /**
@@ -51,6 +53,23 @@ export const EndpointSchema = z.object({
   corpo: z.string().optional(),
   /** Se manca, la giornata si costruisce lo stesso (rose e classifica). */
   facoltativo: z.boolean().default(false),
+  /**
+   * COME SI ESTRAE LA RISPOSTA.
+   *
+   * `json`: il corpo E' JSON. E' il caso di un servizio a contratto.
+   * `json-in-html`: il corpo e' una pagina, e il JSON sta dentro uno dei suoi
+   * `<script>`. E' il caso normale quando si legge un sito invece di un'API.
+   *
+   * Sta sull'ENDPOINT e non sulla fonte perche' un profilo puo' benissimo
+   * prendere una cosa da un'API e un'altra da una pagina.
+   */
+  estrazione: z.enum(['json', 'json-in-html']).default('json'),
+  /**
+   * Quale blocco JSON prendere dentro la pagina, per id (`__NEXT_DATA__` e
+   * simili). Senza, si prende il piu' grande — che e' un'euristica, e quando
+   * si sa l'id e' meglio scriverlo.
+   */
+  bloccoHtml: z.string().optional(),
 });
 export type Endpoint = z.infer<typeof EndpointSchema>;
 
@@ -69,6 +88,30 @@ export const AutenticazioneSchema = z.discriminatedUnion('tipo', [
 ]);
 export type Autenticazione = z.infer<typeof AutenticazioneSchema>;
 
+/**
+ * COME CI PRESENTIAMO.
+ *
+ * Uno scraper anonimo e' quello che si prende il ban dell'IP e l'escalation;
+ * uno che dice chi e' e lascia un contatto si prende, al massimo, una mail. La
+ * differenza costa un header.
+ *
+ * Il contatto non e' decorazione: e' l'unico modo che ha dall'altra parte una
+ * persona ragionevole per chiedere «rallentate» o «smettete» prima di
+ * coinvolgere un avvocato. Lasciarlo fuori significa scegliere che il primo
+ * contatto sia una diffida.
+ */
+export const IdentificazioneSchema = z.object({
+  prodotto: z.string().min(1),
+  versione: z.string().min(1).default('1.0'),
+  /** URL o email a cui il gestore del sito puo' scrivere. */
+  contatto: z.string().min(1),
+});
+export type Identificazione = z.infer<typeof IdentificazioneSchema>;
+
+export function userAgentDi(id: Identificazione): string {
+  return `${id.prodotto}/${id.versione} (+${id.contatto})`;
+}
+
 export const ProfiloFonteSchema = z.object({
   fonte: z.string().min(1),
   version: z.number().int().min(1),
@@ -77,6 +120,29 @@ export const ProfiloFonteSchema = z.object({
   /** Header fissi richiesti dal servizio (mai credenziali: quelle stanno in `auth`). */
   headers: z.record(z.string(), z.string()).default({}),
   /** id canonico del payload -> endpoint da cui prenderlo. */
+  /**
+   * Chi siamo, per il sito che stiamo interrogando. Facoltativa perche' un
+   * servizio a contratto con una chiave sa gia' chi siamo; obbligatoria nei
+   * fatti quando si legge un sito che non ci ha invitato.
+   */
+  identificazione: IdentificazioneSchema.optional(),
+  /**
+   * SE RISPETTARE robots.txt. Predefinito VERO.
+   *
+   * Non e' vincolante quasi da nessuna parte, ma e' il segnale piu' chiaro di
+   * cosa il proprietario voglia ed e' il primo fatto citato quando una
+   * raccolta automatica finisce in discussione. Sta nel profilo — cioe' e' un
+   * DATO, visibile e versionato — perche' disattivarlo dev'essere una
+   * decisione scritta da qualche parte, non un comportamento predefinito che
+   * nessuno ha mai scelto.
+   */
+  rispettaRobots: z.boolean().default(true),
+  /**
+   * Millisecondi minimi fra due richieste allo stesso host. Un `Crawl-delay`
+   * piu' lungo nel loro robots.txt vince su questo: e' una richiesta esplicita
+   * e costa poco esaudirla.
+   */
+  attesaMinimaMs: z.number().int().min(0).default(1000),
   endpoints: z.record(z.string(), EndpointSchema),
   /** id canonico del payload -> mappatura dei campi. La stessa dell'estensione. */
   mappings: z.record(z.string(), FieldMappingSchema),
@@ -167,7 +233,13 @@ export type OpzioniFonte = {
    */
   chiave?: string;
   /** Iniettabile per i test. Di default quella della piattaforma. */
-  fetch?: typeof globalThis.fetch;
+  /**
+   * `fetchImpl` e non `fetch`: nello stesso pacchetto `scaricaRobots` chiama
+   * cosi' la stessa cosa, e due nomi per un concetto solo costano venti minuti
+   * a chi li incontra. Sono costati venti minuti a me, scrivendo i test qui
+   * accanto.
+   */
+  fetchImpl?: typeof globalThis.fetch;
   timeoutMs?: number;
   tentativi?: number;
   /** Attesa fra i tentativi. Iniettabile perche' un test non deve dormire davvero. */
@@ -215,7 +287,7 @@ export class FonteHttp {
   constructor(opzioni: OpzioniFonte) {
     this.profilo = ProfiloFonteSchema.parse(opzioni.profilo);
     this.chiave = opzioni.chiave;
-    this.fetchImpl = opzioni.fetch ?? globalThis.fetch;
+    this.fetchImpl = opzioni.fetchImpl ?? globalThis.fetch;
     this.timeoutMs = opzioni.timeoutMs ?? TIMEOUT_MS;
     this.tentativi = Math.max(1, opzioni.tentativi ?? TENTATIVI);
     this.attesa = opzioni.attesa ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
@@ -238,8 +310,62 @@ export class FonteHttp {
     }
   }
 
+  /**
+   * IL FRENO. Un'attesa minima fra due richieste allo stesso host.
+   *
+   * Il backoff dei tentativi esisteva gia', ma riguarda i GUASTI: fra due
+   * richieste andate a buon fine non c'era niente, e una raffica di richieste
+   * riuscite e' esattamente cio' che un sito vede come un attacco. Costa
+   * qualche secondo per giornata e cambia come si viene percepiti.
+   */
+  private ultimaRichiesta = new Map<string, number>();
+
+  private async frena(url: URL): Promise<void> {
+    /**
+     * Il `Crawl-delay` si legge solo se stiamo rispettando il robots.txt. Un
+     * profilo che dichiara di non rispettarlo non deve nemmeno CHIEDERLO: era
+     * il difetto qui sotto, e si vedeva nei conteggi — una richiesta in piu' a
+     * ogni host, fatta per leggere un file che avevamo gia' deciso di ignorare.
+     */
+    const daRobots = this.profilo.rispettaRobots
+      ? ((await this.robotsDi(url)).attesaSecondi ?? 0) * 1000
+      : 0;
+    const minimo = Math.max(this.profilo.attesaMinimaMs, daRobots);
+    if (minimo <= 0) return;
+
+    const precedente = this.ultimaRichiesta.get(url.host);
+    const adesso = Date.now();
+    if (precedente !== undefined) {
+      const manca = precedente + minimo - adesso;
+      if (manca > 0) await this.attesa(manca);
+    }
+    this.ultimaRichiesta.set(url.host, Date.now());
+  }
+
+  /** Il robots.txt dell'host, letto una volta sola per processo. */
+  private readonly robots = new Map<string, Promise<Robots>>();
+
+  private robotsDi(url: URL): Promise<Robots> {
+    const gia = this.robots.get(url.origin);
+    if (gia) return gia;
+    const agente = this.profilo.identificazione
+      ? userAgentDi(this.profilo.identificazione)
+      : 'FantaComics';
+    const promessa = scaricaRobots(url.origin, agente, { fetchImpl: this.fetchImpl });
+    this.robots.set(url.origin, promessa);
+    return promessa;
+  }
+
   private intestazioni(url: URL): Headers {
     const h = new Headers({ accept: 'application/json', ...this.profilo.headers });
+    /**
+     * Ci si presenta SEMPRE quando il profilo dice chi siamo. Non e' un
+     * dettaglio di cortesia: e' cio' che permette a chi gestisce il sito di
+     * distinguerci dal traffico anonimo e di scriverci invece di bloccarci.
+     */
+    if (this.profilo.identificazione) {
+      h.set('user-agent', userAgentDi(this.profilo.identificazione));
+    }
     const auth = this.profilo.auth;
     if (auth.tipo === 'bearer') h.set('authorization', `Bearer ${this.chiave}`);
     else if (auth.tipo === 'header') h.set(auth.nome, this.chiave!);
@@ -254,9 +380,33 @@ export class FonteHttp {
     const precedente = this.etag.get(chiaveCache);
     if (precedente) intestazioni.set('if-none-match', precedente);
 
+    /**
+     * IL CONTROLLO DI robots.txt STA PRIMA DELLA RICHIESTA, non dopo.
+     *
+     * Dopo sarebbe inutile: la richiesta vietata l'avremmo gia' fatta, e nei
+     * loro log ci sarebbe comunque. Un percorso vietato diventa un errore NON
+     * ritentabile con un messaggio che dice esattamente cosa fare — cambiare
+     * percorso, chiedere un accordo, o decidere consapevolmente di disattivare
+     * il rispetto nel profilo.
+     */
+    if (this.profilo.rispettaRobots) {
+      const robots = await this.robotsDi(url);
+      if (!consentito(robots, url.pathname)) {
+        throw new AdapterError(
+          `Il robots.txt di ${url.host} non consente "${url.pathname}" a chi si presenta `
+          + `come "${this.profilo.identificazione ? userAgentDi(this.profilo.identificazione) : 'FantaComics'}". `
+          + 'Non e\' un errore tecnico: e\' cio\' che quel sito ha chiesto. '
+          + 'Le strade sono un accordo con loro, un percorso diverso, oppure '
+          + '`rispettaRobots: false` nel profilo — che e\' una decisione, e va scritta li\'.',
+          'auth', false,
+        );
+      }
+    }
+
     let ultimo: AdapterError | null = null;
     for (let tentativo = 1; tentativo <= this.tentativi; tentativo++) {
       try {
+        await this.frena(url);
         this.diagnostica.richieste++;
         const risposta = await this.fetchImpl(url, {
           method: endpoint.metodo,
@@ -287,7 +437,7 @@ export class FonteHttp {
           if (!errore.retryable) throw errore;
           ultimo = errore;
         } else {
-          const grezzo = await this.leggiCorpo(risposta, id);
+          const grezzo = await this.leggiCorpo(risposta, id, endpoint);
           const tag = risposta.headers.get('etag');
           if (tag) { this.etag.set(chiaveCache, tag); this.ultimoCorpo.set(chiaveCache, grezzo); }
           return grezzo;
@@ -320,7 +470,7 @@ export class FonteHttp {
     );
   }
 
-  private async leggiCorpo(risposta: Response, id: string): Promise<unknown> {
+  private async leggiCorpo(risposta: Response, id: string, endpoint: Endpoint): Promise<unknown> {
     const lunghezza = Number(risposta.headers.get('content-length') ?? '0');
     if (lunghezza > MAX_BYTE_RISPOSTA) {
       throw new AdapterError(
@@ -333,6 +483,22 @@ export class FonteHttp {
         `La risposta per "${id}" supera il limite consentito.`, 'parse', false,
       );
     }
+
+    if (endpoint.estrazione === 'json-in-html') {
+      const blocchi = jsonDentroHtml(testo);
+      const scelto = scegliBlocco(blocchi, endpoint.bloccoHtml);
+      if (!scelto) {
+        throw new AdapterError(
+          `Nessun blocco JSON utilizzabile dentro la pagina di "${id}"`
+          + (endpoint.bloccoHtml ? ` con id "${endpoint.bloccoHtml}"` : '')
+          + `. Blocchi trovati: ${blocchi.length === 0 ? 'nessuno' : blocchi.map((b) => b.dove).join(', ')}. `
+          + 'Probabile che la pagina sia cambiata: rilancia ispeziona-fonte.ts.',
+          'parse', false,
+        );
+      }
+      return scelto.valore;
+    }
+
     try {
       return JSON.parse(testo);
     } catch {
