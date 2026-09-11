@@ -64,7 +64,7 @@ describe('pipeline end-to-end', () => {
     // Il pack va persistito con l'edizione: senza, il giornale non si rilegge.
     expect(published?.pack.facts.length).toBeGreaterThan(0);
     expect(published?.pack.results.length).toBeGreaterThan(0);
-    expect(await store.listEditions('lega-test')).toEqual([12]);
+    expect(await store.listEditions('lega-test')).toEqual([{ matchday: 12, kind: 'giornale' }]);
     const corpus = await store.getCorpus();
     expect(corpus?.sortedTeamPoints).toHaveLength(8);
   });
@@ -194,7 +194,9 @@ describe('configurazione della lega e isolamento tra proprietari', () => {
     await run(11, store);
     await run(12, store);
 
-    expect(await store.listEditions('lega-test')).toEqual([12, 11]);
+    expect(await store.listEditions('lega-test')).toEqual([
+      { matchday: 12, kind: 'giornale' }, { matchday: 11, kind: 'giornale' },
+    ]);
     const config = await store.getConfigForOwner('lega-test', 'acc-mario');
     expect(config?.leagueName).toBe('Lega Test');
     expect(config?.lastMatchday).toBe(12);

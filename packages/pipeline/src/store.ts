@@ -1,6 +1,8 @@
 import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import type { Edition, FactPack, LeagueRoster, LeagueRuleset } from '@fantacomics/core';
+import type {
+  Edition, EditionKind, FactPack, LeagueRoster, LeagueRuleset,
+} from '@fantacomics/core';
 import { LeagueRosterSchema } from '@fantacomics/core';
 import type { HistoricalMatchday, LeagueHistory, RarityCorpus } from '@fantacomics/facts';
 import { emptyMemory, type EditorialMemory } from '@fantacomics/editorial';
@@ -74,6 +76,54 @@ export type LeagueConfig = {
  * pack. Senza pack il giornale non si può ricostruire, e un archivio che non
  * si rilegge non è un archivio.
  */
+/** L'indirizzo di un'edizione dentro una lega. */
+export type EditionRef = {
+  matchday: number;
+  kind: EditionKind;
+};
+
+/**
+ * Il nome del file (e la chiave in memoria) di un'edizione.
+ *
+ * Il retrospettivo conserva il nome che aveva PRIMA che l'anteprima esistesse:
+ * gli archivi gia' scritti su disco continuano a rileggersi, e non serve una
+ * migrazione dei file per una tabella che non ha ancora un utente pagante.
+ */
+export function chiaveEdizione(matchday: number, kind: EditionKind | undefined): string {
+  return tipoEdizione(kind) === 'anteprima' ? `g${matchday}-anteprima` : `g${matchday}`;
+}
+
+/**
+ * IL TIPO DI UN PACK, NORMALIZZATO. Tutto cio' che non e' esplicitamente
+ * un'anteprima e' un retrospettivo.
+ *
+ * Non e' pignoleria difensiva: `pack.kind` ha un valore predefinito nello
+ * schema, ma i pack che arrivano da un archivio scritto prima che il campo
+ * esistesse NON passano da quello schema — Postgres restituisce `row.pack` con
+ * un cast, non con un parse, e su disco il JSON e' quello che era. Senza
+ * normalizzazione un pack vecchio produce la chiave «g7-undefined» e la sua
+ * edizione diventa illeggibile: trovato dalla suite di contratto, che usa
+ * proprio un pack senza `kind`.
+ */
+export function tipoEdizione(kind: EditionKind | undefined): EditionKind {
+  return kind === 'anteprima' ? 'anteprima' : 'giornale';
+}
+
+const NOME_EDIZIONE = /^g(\d+)(?:-(anteprima))?\.json$/;
+
+/**
+ * SOLO IL RETROSPETTIVO FA AVANZARE `lastMatchday`.
+ *
+ * Quel campo dice al pianificatore quale giornata consegnare la prossima
+ * volta. Se la vigilia della 12 lo portasse a 12, il pianificatore passerebbe
+ * alla 13 e il retrospettivo della 12 — il numero che racconta le partite —
+ * non uscirebbe mai. Sarebbe il difetto peggiore possibile: silenzioso,
+ * identico a un funzionamento normale, e scoperto dal cliente.
+ */
+function avanzaPuntatore(pack: FactPack): boolean {
+  return tipoEdizione(pack.kind) !== 'anteprima';
+}
+
 export type PublishedEdition = {
   edition: Edition;
   pack: FactPack;
@@ -144,8 +194,22 @@ export interface LeagueStore {
    */
   getConfigByRelaySecret(relaySecret: string): Promise<LeagueConfig | null>;
   saveConfig(config: LeagueConfig): Promise<void>;
-  getEdition(leagueId: string, matchday: number): Promise<PublishedEdition | null>;
-  listEditions(leagueId: string): Promise<number[]>;
+  /**
+   * Un'edizione, identificata da giornata E TIPO.
+   *
+   * IL TIPO FA PARTE DELLA CHIAVE, e non e' un dettaglio di modellazione: le
+   * due uscite della settimana parlano della STESSA giornata — la vigilia la
+   * mattina in cui si comincia, il retrospettivo la mattina dopo l'ultima
+   * partita. Con la sola giornata come chiave la seconda sovrascriverebbe la
+   * prima, e il cliente perderebbe un numero su due senza alcun errore.
+   *
+   * Predefinito `giornale`: ogni chiamante scritto prima che l'anteprima
+   * esistesse chiedeva il retrospettivo, e continua a ottenere quello.
+   */
+  getEdition(
+    leagueId: string, matchday: number, kind?: EditionKind,
+  ): Promise<PublishedEdition | null>;
+  listEditions(leagueId: string): Promise<EditionRef[]>;
   getMemory(leagueId: string): Promise<EditorialMemory>;
   saveMemory(leagueId: string, memory: EditorialMemory): Promise<void>;
   getHistory(leagueId: string): Promise<LeagueHistory>;
@@ -155,7 +219,9 @@ export interface LeagueStore {
    * Approva un'edizione sotto soglia. Dice se l'ha approvata questa chiamata:
    * un'approvazione che non trova l'edizione non deve poter dire di si'.
    */
-  approveEdition(leagueId: string, matchday: number, at: string): Promise<boolean>;
+  approveEdition(
+    leagueId: string, matchday: number, at: string, kind?: EditionKind,
+  ): Promise<boolean>;
   /**
    * Le rose della lega: durano una stagione, non una giornata.
    *
@@ -321,32 +387,44 @@ export class FileLeagueStore implements LeagueStore {
     await this.writeJson(this.path('relay.json'), relay);
   }
 
-  async getEdition(leagueId: string, matchday: number): Promise<PublishedEdition | null> {
+  async getEdition(
+    leagueId: string, matchday: number, kind: EditionKind = 'giornale',
+  ): Promise<PublishedEdition | null> {
     const letta = await this.readJson<PublishedEdition | null>(
-      this.path('editions', leagueId, `g${matchday}.json`), null,
+      this.path('editions', leagueId, `${chiaveEdizione(matchday, kind)}.json`), null,
     );
     // Le edizioni scritte prima che l'approvazione esistesse non hanno il
     // campo: valgono come non approvate, che e' la lettura prudente.
     return letta ? { ...letta, approvedAt: letta.approvedAt ?? null } : null;
   }
 
-  async approveEdition(leagueId: string, matchday: number, at: string): Promise<boolean> {
-    const corrente = await this.getEdition(leagueId, matchday);
+  async approveEdition(
+    leagueId: string, matchday: number, at: string, kind: EditionKind = 'giornale',
+  ): Promise<boolean> {
+    const corrente = await this.getEdition(leagueId, matchday, kind);
     if (!corrente) return false;
     await this.writeJson(
-      this.path('editions', leagueId, `g${matchday}.json`),
+      this.path('editions', leagueId, `${chiaveEdizione(matchday, kind)}.json`),
       { ...corrente, approvedAt: at } satisfies PublishedEdition,
     );
     return true;
   }
 
-  async listEditions(leagueId: string): Promise<number[]> {
+  async listEditions(leagueId: string): Promise<EditionRef[]> {
     try {
       const files = await readdir(this.path('editions', leagueId));
       return files
-        .map((f) => Number(/^g(\d+)\.json$/.exec(f)?.[1]))
-        .filter((n) => Number.isInteger(n))
-        .sort((a, b) => b - a);
+        .map((f): EditionRef | null => {
+          const m = NOME_EDIZIONE.exec(f);
+          const n = Number(m?.[1]);
+          if (!Number.isInteger(n)) return null;
+          return { matchday: n, kind: m?.[2] === 'anteprima' ? 'anteprima' : 'giornale' };
+        })
+        .filter((r): r is EditionRef => r !== null)
+        // Giornata decrescente, e a pari giornata prima il retrospettivo:
+        // e' il piu' recente dei due, quindi quello che l'archivio deve
+        // mostrare in testa.
+        .sort((a, b) => b.matchday - a.matchday || a.kind.localeCompare(b.kind));
     } catch {
       return [];
     }
@@ -378,12 +456,14 @@ export class FileLeagueStore implements LeagueStore {
     // Rigenerare una giornata azzera l'approvazione: il testo e' cambiato,
     // quindi il "va bene" di prima non riguarda piu' questo giornale.
     await this.writeJson(
-      this.path('editions', leagueId, `g${edition.meta.matchday}.json`),
+      this.path('editions', leagueId, `${chiaveEdizione(edition.meta.matchday, pack.kind)}.json`),
       { edition, pack, approvedAt: null } satisfies PublishedEdition,
     );
-    const config = await this.readConfig(leagueId);
-    if (config && (config.lastMatchday ?? 0) < edition.meta.matchday) {
-      await this.saveConfig({ ...config, lastMatchday: edition.meta.matchday });
+    if (avanzaPuntatore(pack)) {
+      const config = await this.readConfig(leagueId);
+      if (config && (config.lastMatchday ?? 0) < edition.meta.matchday) {
+        await this.saveConfig({ ...config, lastMatchday: edition.meta.matchday });
+      }
     }
   }
 
@@ -461,14 +541,16 @@ export class InMemoryLeagueStore implements LeagueStore {
     return [...this.configs.values()].find((c) => c.relaySecret === relaySecret) ?? null;
   }
   async saveConfig(config: LeagueConfig): Promise<void> { this.configs.set(config.leagueId, config); }
-  async getEdition(leagueId: string, matchday: number): Promise<PublishedEdition | null> {
-    return this.editions.get(`${leagueId}:${matchday}`) ?? null;
+  async getEdition(
+    leagueId: string, matchday: number, kind: EditionKind = 'giornale',
+  ): Promise<PublishedEdition | null> {
+    return this.editions.get(`${leagueId}:${chiaveEdizione(matchday, kind)}`) ?? null;
   }
-  async listEditions(leagueId: string): Promise<number[]> {
-    return [...this.editions.keys()]
-      .filter((k) => k.startsWith(`${leagueId}:`))
-      .map((k) => Number(k.split(':')[1]))
-      .sort((a, b) => b - a);
+  async listEditions(leagueId: string): Promise<EditionRef[]> {
+    return [...this.editions.values()]
+      .filter((e) => e.edition.meta.leagueId === leagueId)
+      .map((e) => ({ matchday: e.edition.meta.matchday, kind: tipoEdizione(e.pack.kind) }))
+      .sort((a, b) => b.matchday - a.matchday || a.kind.localeCompare(b.kind));
   }
 
   private state(leagueId: string): LeagueState {
@@ -502,8 +584,10 @@ export class InMemoryLeagueStore implements LeagueStore {
       .sort((a, b) => a.matchday - b.matchday);
   }
 
-  async approveEdition(leagueId: string, matchday: number, at: string): Promise<boolean> {
-    const chiave = `${leagueId}:${matchday}`;
+  async approveEdition(
+    leagueId: string, matchday: number, at: string, kind: EditionKind = 'giornale',
+  ): Promise<boolean> {
+    const chiave = `${leagueId}:${chiaveEdizione(matchday, kind)}`;
     const corrente = this.editions.get(chiave);
     if (!corrente) return false;
     this.editions.set(chiave, { ...corrente, approvedAt: at });
@@ -511,7 +595,11 @@ export class InMemoryLeagueStore implements LeagueStore {
   }
 
   async saveEdition(leagueId: string, edition: Edition, pack: FactPack): Promise<void> {
-    this.editions.set(`${leagueId}:${edition.meta.matchday}`, { edition, pack, approvedAt: null });
+    this.editions.set(
+      `${leagueId}:${chiaveEdizione(edition.meta.matchday, pack.kind)}`,
+      { edition, pack, approvedAt: null },
+    );
+    if (!avanzaPuntatore(pack)) return;
     const config = this.configs.get(leagueId);
     if (config && (config.lastMatchday ?? 0) < edition.meta.matchday) {
       this.configs.set(leagueId, { ...config, lastMatchday: edition.meta.matchday });

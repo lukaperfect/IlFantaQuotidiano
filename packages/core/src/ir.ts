@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { EditionKindSchema } from './facts.js';
 
 /**
  * Document IR — il contratto tra LLM e rendering.
@@ -102,6 +103,18 @@ export const EditionMetaSchema = z.object({
   leagueName: z.string().min(1),
   season: z.string(),
   matchday: z.number().int().min(1).max(38),
+  /**
+   * Quale dei due numeri della settimana e' questo.
+   *
+   * Sta nei METADATI dell'edizione e non solo nel fact pack perche' chi rende
+   * la pagina, chi la elenca in archivio e chi ne compone il titolo hanno tutti
+   * bisogno di saperlo, e alcuni di loro — il renderer delle card, per esempio —
+   * il pack non lo ricevono affatto.
+   *
+   * Predefinito `giornale`: le edizioni salvate prima che l'anteprima
+   * esistesse si rileggono senza migrazione.
+   */
+  kind: EditionKindSchema.default('giornale'),
   publishedAt: z.string().datetime({ offset: true }),
   /** Versioning completo: riproducibilità, A/B sui prompt, risposte alle contestazioni. */
   factEngineVersion: z.string(),

@@ -99,8 +99,13 @@ export function buildFactPack(
     matchday: result.snapshot.matchday,
     season: result.snapshot.season,
     factEngineVersion: FACT_ENGINE_VERSION,
+    // Esplicito: questo e' il retrospettivo. L'anteprima ha il suo costruttore,
+    // e le due cose non devono poter essere scambiate per distrazione.
+    kind: 'giornale',
     facts: output.facts,
     results,
+    // Un retrospettivo non ha partite in programma: il tabellino sta in `results`.
+    fixtures: [],
     standings: rows.map((r, i) => ({
       position: `${i + 1}°`,
       teamName: ctx.teamName(r.teamId),

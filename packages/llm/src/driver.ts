@@ -1,4 +1,4 @@
-import type { Block, NarrativeFact, Slot } from '@fantacomics/core';
+import type { Block, EditionKind, NarrativeFact, Slot } from '@fantacomics/core';
 
 export type SpiceLevel = 1 | 2 | 3;
 
@@ -13,6 +13,10 @@ export type ArticleRequest = {
   leagueName: string;
   matchday: number;
   spice: SpiceLevel;
+  /** Vigilia o retrospettivo. Predefinito `giornale` presso ogni consumatore. */
+  kind?: EditionKind;
+  /** Gli accoppiamenti in programma: solo nell'anteprima, dove non c'e' tabellino. */
+  fixtures?: readonly { homeTeam: string; awayTeam: string }[];
   allowedBlockKinds?: readonly string[];
   /** Correzione per il secondo tentativo dopo una violazione di grounding. */
   correction?: string;
@@ -22,6 +26,7 @@ export type CardRequest = {
   leagueName: string;
   matchday: number;
   spice: SpiceLevel;
+  kind?: EditionKind;
   cards: readonly { teamId: string; teamName: string; fact: NarrativeFact; tone: string }[];
 };
 

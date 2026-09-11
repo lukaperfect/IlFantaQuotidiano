@@ -121,8 +121,17 @@ export function renderArticle(article: Article, ctx: RenderContext, personaName?
   ].filter(Boolean).join('\n');
 }
 
-/** Il tabellino della giornata: dati puri, nessun testo generato. */
+/**
+ * Il tabellino della giornata: dati puri, nessun testo generato.
+ *
+ * SENZA RIGHE NON SI STAMPA NIENTE, nemmeno l'intestazione. Prima la tabella
+ * usciva comunque, e il risultato era un titolo «Risultati» con il vuoto
+ * sotto: sul retrospettivo non capitava mai — un tabellino ce l'ha sempre — e
+ * sull'anteprima capitava sempre. Un'intestazione senza contenuto e' la firma
+ * di una pagina rotta, ed e' peggio dell'assenza.
+ */
 export function renderResults(ctx: RenderContext): string {
+  if (ctx.pack.results.length === 0) return '';
   const rows = ctx.pack.results.map((r) => `
     <tr>
       <td class="team">${esc(r.homeTeam)}</td>
@@ -134,6 +143,8 @@ export function renderResults(ctx: RenderContext): string {
 }
 
 export function renderStandings(ctx: RenderContext): string {
+  // Idem: a giornata zero la classifica non esiste, e non si annuncia il vuoto.
+  if (ctx.pack.standings.length === 0) return '';
   const rows = ctx.pack.standings.map((s) => `
     <tr>
       <td class="pos">${esc(s.position)}</td>
@@ -143,11 +154,41 @@ export function renderStandings(ctx: RenderContext): string {
   return `<table class="standings"><caption>Classifica</caption><tbody>${rows}</tbody></table>`;
 }
 
+/**
+ * LE PARTITE IN PROGRAMMA: il tabellino che l'anteprima ha al posto dei
+ * risultati. Nessun punteggio, perche' non esiste ancora.
+ */
+export function renderFixtures(ctx: RenderContext): string {
+  if (ctx.pack.fixtures.length === 0) return '';
+  const rows = ctx.pack.fixtures.map((f) => `
+    <tr>
+      <td class="team">${esc(f.homeTeam)}</td>
+      <td class="score">—</td>
+      <td class="team">${esc(f.awayTeam)}</td>
+    </tr>`).join('');
+  return `<table class="results"><caption>Si gioca</caption><tbody>${rows}</tbody></table>`;
+}
+
+/**
+ * Come si chiama questo numero, in una riga.
+ *
+ * Sta in una funzione perche' lo dicono tre posti — l'occhiello, il titolo del
+ * documento e l'anteprima social — e li avevo lasciati divergere: la testata
+ * diceva «Vigilia della giornata 1» mentre il titolo della finestra diceva
+ * «Giornata 1». Con due numeri a settimana sulla stessa giornata, un lettore
+ * con due schede aperte non sa quale ha in mano.
+ */
+export function nomeDelNumero(edition: Edition): string {
+  return edition.meta.kind === 'anteprima'
+    ? `Vigilia della giornata ${edition.meta.matchday}`
+    : `Giornata ${edition.meta.matchday}`;
+}
+
 export function renderMasthead(ctx: RenderContext): string {
   const { edition } = ctx;
   return [
     '<header class="masthead">',
-    `<p class="masthead__kicker">${esc(edition.meta.season)} · Giornata ${edition.meta.matchday}</p>`,
+    `<p class="masthead__kicker">${esc(edition.meta.season)} · ${esc(nomeDelNumero(edition))}</p>`,
     `<h1 class="masthead__title">${esc(edition.masthead.title)}</h1>`,
     `<p class="masthead__tagline">${esc(edition.masthead.tagline)}</p>`,
     '</header>',

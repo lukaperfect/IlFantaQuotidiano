@@ -64,7 +64,7 @@ const implementazioni: { nome: string; salta: boolean; crea: () => Promise<Ambie
   },
 ];
 
-const edizione = (matchday: number, confidence: number) => ({
+const edizione = (matchday: number, confidence = 0.9) => ({
   meta: {
     leagueId: 'lega-1', leagueName: 'Lega Uno', season: '2025-26', matchday,
     publishedAt: '2026-01-06T08:00:00.000Z', factEngineVersion: '1.0.0',
@@ -76,9 +76,9 @@ const edizione = (matchday: number, confidence: number) => ({
   personalCards: [],
 }) as never;
 
-const packVuoto = (matchday: number) => ({
+const packVuoto = (matchday: number, kind: 'giornale' | 'anteprima' = 'giornale') => ({
   leagueId: 'lega-1', leagueName: 'Lega Uno', matchday, season: '2025-26',
-  factEngineVersion: '1.0.0', facts: [], results: [], standings: [],
+  factEngineVersion: '1.0.0', kind, facts: [], results: [], fixtures: [], standings: [],
 }) as never;
 
 const lega = (over: Record<string, unknown> = {}) => ({
@@ -314,8 +314,61 @@ for (const impl of implementazioni) {
       const letto = await env.league.getEdition('lega-1', 7);
       expect(letto?.edition.meta.matchday).toBe(7);
       expect(letto?.pack.leagueName).toBe('Lega Uno');
-      expect(await env.league.listEditions('lega-1')).toEqual([7]);
+      // Il tipo fa parte dell'indirizzo, quindi l'elenco lo dice.
+      expect(await env.league.listEditions('lega-1')).toEqual([{ matchday: 7, kind: 'giornale' }]);
       expect((await env.league.getConfigForOwner('lega-1', 'acc-mario'))?.lastMatchday).toBe(7);
+    });
+
+    it('la vigilia e il retrospettivo della stessa giornata convivono', async () => {
+      /**
+       * Le due uscite della settimana parlano della STESSA giornata. Con la
+       * sola giornata come chiave la seconda sovrascriveva la prima, e il
+       * cliente perdeva un numero su due senza alcun errore: la verifica piu'
+       * importante di tutto il tipo di edizione.
+       */
+      await env.league.saveConfig(lega());
+      await env.league.saveEdition('lega-1', edizione(7), packVuoto(7));
+      await env.league.saveEdition('lega-1', edizione(7), packVuoto(7, 'anteprima'));
+
+      expect(await env.league.getEdition('lega-1', 7, 'giornale')).not.toBeNull();
+      expect(await env.league.getEdition('lega-1', 7, 'anteprima')).not.toBeNull();
+      expect(await env.league.listEditions('lega-1')).toEqual([
+        { matchday: 7, kind: 'anteprima' }, { matchday: 7, kind: 'giornale' },
+      ]);
+    });
+
+    it('la vigilia NON fa avanzare il puntatore delle giornate', async () => {
+      /**
+       * `lastMatchday` dice al pianificatore quale giornata consegnare la
+       * prossima volta. Se la vigilia della 7 lo portasse a 7, il
+       * retrospettivo della 7 — il numero con i risultati — non uscirebbe
+       * mai, e il guasto sarebbe indistinguibile dal funzionamento normale.
+       */
+      await env.league.saveConfig(lega());
+      await env.league.saveEdition('lega-1', edizione(7), packVuoto(7, 'anteprima'));
+      expect((await env.league.getConfigForOwner('lega-1', 'acc-mario'))?.lastMatchday).toBeNull();
+
+      await env.league.saveEdition('lega-1', edizione(7), packVuoto(7));
+      expect((await env.league.getConfigForOwner('lega-1', 'acc-mario'))?.lastMatchday).toBe(7);
+    });
+
+    it('un pack scritto prima che il tipo esistesse vale come retrospettivo', async () => {
+      /**
+       * `pack.kind` ha un valore predefinito nello SCHEMA, ma i pack che
+       * arrivano da un archivio scritto prima non passano dallo schema:
+       * Postgres restituisce la colonna con un cast e il file su disco e'
+       * quello che era. Senza normalizzare, quel pack produce una chiave
+       * «g7-undefined» oppure un elenco con `kind: undefined`.
+       */
+      await env.league.saveConfig(lega());
+      const senzaTipo = {
+        leagueId: 'lega-1', leagueName: 'Lega Uno', matchday: 7, season: '2025-26',
+        factEngineVersion: '1.0.0', facts: [], results: [], standings: [],
+      } as never;
+      await env.league.saveEdition('lega-1', edizione(7), senzaTipo);
+
+      expect(await env.league.getEdition('lega-1', 7, 'giornale')).not.toBeNull();
+      expect(await env.league.listEditions('lega-1')).toEqual([{ matchday: 7, kind: 'giornale' }]);
     });
 
     it('un’edizione sotto soglia non e’ leggibile finche’ nessuno la approva', async () => {

@@ -1,3 +1,4 @@
+import type { EditionKind } from '@fantacomics/core';
 import { PERSONAS } from '@fantacomics/editorial';
 import { renderWebPage } from '@fantacomics/render';
 import { store } from '@/lib/store';
@@ -20,7 +21,7 @@ const personaNames = Object.fromEntries(PERSONAS.map((p) => [p.id, p.name]));
  * nel gruppo.
  */
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string; matchday: string }> },
 ): Promise<Response> {
   const account = await currentAccount();
@@ -34,7 +35,17 @@ export async function GET(
   const n = Number(matchday);
   if (!Number.isInteger(n)) return new Response('Giornata non valida', { status: 400 });
 
-  const published = await store.getEdition(config.leagueId, n);
+  /**
+   * `?tipo=anteprima` per rivedere la VIGILIA di quella giornata. La stessa
+   * giornata ne ha due, e senza questo si sarebbe potuta rivedere solo una —
+   * l'altra sarebbe rimasta in coda senza modo di guardarla, cioe' nel cestino
+   * che questa pagina esiste per non essere.
+   */
+  const tipo: EditionKind = new URL(request.url).searchParams.get('tipo') === 'anteprima'
+    ? 'anteprima'
+    : 'giornale';
+
+  const published = await store.getEdition(config.leagueId, n, tipo);
   if (!published) return new Response('Non trovata', { status: 404 });
 
   const html = renderWebPage(published.edition, published.pack, { personaNames });

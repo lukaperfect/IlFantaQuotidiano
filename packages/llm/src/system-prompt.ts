@@ -86,3 +86,33 @@ export function spiceDirective(level: 1 | 2 | 3): string {
   };
   return map[level];
 }
+
+/**
+ * LA DIRETTIVA DELL'ANTEPRIMA.
+ *
+ * Un numero di vigilia va scritto al futuro, e il modello non lo puo' dedurre
+ * dai fatti: un fatto d'asta e' al passato («ha pagato 460») anche quando la
+ * partita e' domani, e senza istruzione esplicita il pezzo esce come se il
+ * turno fosse finito — «la sconfitta di ieri» su una giornata non giocata.
+ *
+ * STA QUI E NON NEL PREFISSO CONGELATO. Il prefisso e' identico per ogni lega
+ * e ogni giornata: e' il perno della cache, ed e' la ragione per cui il costo
+ * per edizione sta dentro 4,99 euro a stagione. Due prefissi diversi
+ * significano due voci di cache, cioe' il doppio dei cache write e un cold
+ * miss a ogni alternanza fra vigilia e retrospettivo — che e' esattamente il
+ * ritmo del prodotto, due uscite a settimana una per tipo. Il canale system a
+ * meta' conversazione porta la stessa forza di istruzione senza toccare il
+ * prefisso, ed e' il meccanismo che il livello di piccante usa gia'.
+ */
+export function anteprimaDirective(): string {
+  return [
+    'Questo numero e\' l\'ANTEPRIMA della giornata: esce la mattina in cui si comincia a',
+    'giocare e nessuna partita e\' ancora stata giocata.',
+    '- Non raccontare nessun risultato, punteggio o esito di questa giornata: non esistono.',
+    '- I numeri che ricevi vengono dall\'asta, dalla classifica e dalle giornate PRECEDENTI.',
+    '  Restano veri, e si citano al passato: chi ha pagato quanto, chi ha vinto le ultime.',
+    '- Le partite in programma si raccontano al futuro: attesa, previsioni, conti aperti.',
+    '- Una previsione va dichiarata come previsione. Non scrivere mai come se il risultato',
+    '  fosse noto, nemmeno per ironia: il lettore apre il giornale prima di giocare.',
+  ].join('\n');
+}

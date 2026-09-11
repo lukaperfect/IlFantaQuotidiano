@@ -263,3 +263,117 @@ describe('impaginazione', () => {
     expect(plan.articles.length).toBeGreaterThan(0);
   });
 });
+
+/* ------------------------------------------------------------------ *
+ * L'edizione di vigilia
+ * ------------------------------------------------------------------ */
+
+describe('il mazzo dei format dipende dal tipo di edizione', () => {
+  /** Un fatto d'asta: esiste alla vigilia e non parla di nessuna partita. */
+  const fattoAsta = (i: number): NarrativeFact => ({
+    id: `asta-${i}`,
+    type: 'PEZZO_PREGIATO',
+    matchday: 1,
+    subjects: [{ kind: 'team', id: `t${i}`, display: `Squadra ${i}` }],
+    numbers: { prezzo: String(100 + i) },
+    polarity: 'mediocrita',
+    drama: 40 - i,
+    rarityPercentile: null,
+    plain: `La squadra ${i} ha pagato ${100 + i}.`,
+    evidence: [],
+  });
+
+  const vigilia = (over: Partial<SelectionInput> = {}): SelectionInput => ({
+    facts: Array.from({ length: 14 }, (_, i) => fattoAsta(i)),
+    teamIds: Array.from({ length: 10 }, (_, i) => `t${i}`),
+    matchday: 1,
+    leagueId: 'lega-vigilia',
+    memory: emptyMemory(),
+    spice: 2,
+    targetArticles: 8,
+    kind: 'anteprima',
+    ...over,
+  });
+
+  it('una vigilia non stampa un necrologio per chi non ha ancora giocato', () => {
+    const plan = planEdition(vigilia());
+    expect(plan.articles.length).toBeGreaterThanOrEqual(5);
+    for (const a of plan.articles) {
+      expect(
+        a.format.edizioni,
+        `${a.format.id} non si dichiara adatto a un'anteprima`,
+      ).toContain('anteprima');
+    }
+  });
+
+  it('e un retrospettivo non usa i format nati per la vigilia', () => {
+    const plan = planEdition({ ...vigilia(), kind: 'giornale' });
+    for (const a of plan.articles) expect(a.format.edizioni).toContain('giornale');
+  });
+
+  it('senza accoppiamenti nessun pezzo promette una sfida da presentare', () => {
+    /**
+     * `presentazione_sfida` e' l'apertura nata per la vigilia, e la sua forma
+     * PROMETTE due squadre che si incontrano. Alla prima giornata di una lega
+     * nuova il calendario puo' non essere ancora arrivato: dato un solo fatto
+     * d'asta, quel format scriverebbe di uno scontro che non ha. Misurato: il
+     * giornale apriva esattamente cosi'.
+     */
+    const plan = planEdition(vigilia());
+    const conAncoraSbagliata = plan.articles.filter(
+      (a) => a.format.richiedeAncora
+        && !a.format.richiedeAncora.includes(a.facts[0]?.type ?? 'GOLEADA'),
+    );
+    expect(
+      conAncoraSbagliata.map((a) => `${a.format.id}/${a.facts[0]?.type}`),
+    ).toEqual([]);
+    expect(plan.articles.map((a) => a.format.id)).not.toContain('presentazione_sfida');
+  });
+
+  it('con gli accoppiamenti la sfida di giornata torna disponibile', () => {
+    const sfida: NarrativeFact = {
+      id: 'sfida-1',
+      type: 'SFIDA_IN_PROGRAMMA',
+      matchday: 1,
+      subjects: [
+        { kind: 'team', id: 't0', display: 'Squadra 0' },
+        { kind: 'team', id: 't1', display: 'Squadra 1' },
+      ],
+      numbers: { spesa_casa: '1000', spesa_ospite: '913' },
+      polarity: 'mediocrita',
+      // Piu' drammatica di ogni fatto d'asta: e' l'ancora dell'apertura.
+      drama: 90,
+      rarityPercentile: null,
+      plain: 'Squadra 0 contro Squadra 1.',
+      evidence: [],
+    };
+    const plan = planEdition(vigilia({
+      facts: [sfida, ...Array.from({ length: 14 }, (_, i) => fattoAsta(i))],
+    }));
+    expect(plan.articles[0]?.format.id).toBe('presentazione_sfida');
+    expect(plan.articles[0]?.facts[0]?.type).toBe('SFIDA_IN_PROGRAMMA');
+  });
+
+  it('ogni slot dell\'impaginato ha almeno un format per ciascun tipo di edizione', () => {
+    /**
+     * Controllo STRUTTURALE sul mazzo, non sul comportamento: e' cio' che
+     * impedisce che una carta aggiunta domani lasci uno slot scoperto in una
+     * delle due edizioni. Uno slot scoperto non da' errore — da' un giornale
+     * senza prima pagina.
+     */
+    for (const kind of ['giornale', 'anteprima'] as const) {
+      for (const slot of ['apertura', 'spalla', 'taglio_basso', 'interno', 'rubrica'] as const) {
+        const carte = FORMAT_DECK.filter(
+          (f) => f.edizioni.includes(kind) && f.slots.includes(slot),
+        );
+        expect(carte.length, `${kind}/${slot} senza format`).toBeGreaterThan(0);
+        // E almeno una senza vincolo di ancora: altrimenti lo slot si copre
+        // solo quando capita il fatto giusto.
+        expect(
+          carte.some((f) => !f.richiedeAncora),
+          `${kind}/${slot}: ogni format pretende un'ancora precisa`,
+        ).toBe(true);
+      }
+    }
+  });
+});

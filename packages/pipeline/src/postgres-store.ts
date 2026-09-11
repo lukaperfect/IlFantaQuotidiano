@@ -2,13 +2,16 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import pg from 'pg';
-import type { Edition, FactPack, LeagueRoster, LeagueRuleset } from '@fantacomics/core';
+import type {
+  Edition, EditionKind, FactPack, LeagueRoster, LeagueRuleset,
+} from '@fantacomics/core';
 import { LeagueRosterSchema } from '@fantacomics/core';
 import type { Account, AuthStore, MagicLink } from '@fantacomics/auth';
 import { emptyMemory, type EditorialMemory } from '@fantacomics/editorial';
 import type { HistoricalMatchday, LeagueHistory, RarityCorpus } from '@fantacomics/facts';
 import type { Observation } from '@fantacomics/ingest';
-import type { LeagueConfig, LeagueStore, PublishedEdition } from './store.js';
+import { tipoEdizione } from './store.js';
+import type { EditionRef, LeagueConfig, LeagueStore, PublishedEdition } from './store.js';
 
 /**
  * Implementazione su Postgres delle stesse interfacce servite dai file store.
@@ -120,10 +123,13 @@ export class PostgresLeagueStore implements LeagueStore {
     );
   }
 
-  async getEdition(leagueId: string, matchday: number): Promise<PublishedEdition | null> {
+  async getEdition(
+    leagueId: string, matchday: number, kind: EditionKind = 'giornale',
+  ): Promise<PublishedEdition | null> {
     const { rows } = await this.pool.query(
-      'select edition, pack, approved_at from editions where league_id = $1 and matchday = $2',
-      [leagueId, matchday],
+      'select edition, pack, approved_at from editions '
+      + 'where league_id = $1 and matchday = $2 and kind = $3',
+      [leagueId, matchday, kind],
     );
     const row = rows[0];
     if (!row) return null;
@@ -136,24 +142,39 @@ export class PostgresLeagueStore implements LeagueStore {
     };
   }
 
-  async listEditions(leagueId: string): Promise<number[]> {
+  async listEditions(leagueId: string): Promise<EditionRef[]> {
     const { rows } = await this.pool.query(
-      'select matchday from editions where league_id = $1 order by matchday desc', [leagueId],
+      'select matchday, kind from editions where league_id = $1 '
+      + 'order by matchday desc, kind asc',
+      [leagueId],
     );
-    return rows.map((r) => Number(r.matchday));
+    return rows.map((r) => ({
+      matchday: Number(r.matchday),
+      kind: r.kind === 'anteprima' ? 'anteprima' : 'giornale',
+    }));
   }
 
   async saveEdition(leagueId: string, edition: Edition, pack: FactPack): Promise<void> {
     await this.pool.query(
-      `insert into editions (league_id, matchday, edition, pack, approved_at)
-       values ($1,$2,$3,$4,null)
-       on conflict (league_id, matchday) do update set
+      `insert into editions (league_id, matchday, kind, edition, pack, approved_at)
+       values ($1,$2,$3,$4,$5,null)
+       on conflict (league_id, matchday, kind) do update set
          edition = excluded.edition, pack = excluded.pack,
          -- Rigenerare azzera l'approvazione: il testo e' cambiato, quindi il
          -- "va bene" di prima non riguarda piu' questo giornale.
          approved_at = null`,
-      [leagueId, edition.meta.matchday, JSON.stringify(edition), JSON.stringify(pack)],
+      [
+        leagueId, edition.meta.matchday, tipoEdizione(pack.kind),
+        JSON.stringify(edition), JSON.stringify(pack),
+      ],
     );
+    /**
+     * La vigilia NON tocca il puntatore: vedi `avanzaPuntatore` nello store su
+     * file, dove la ragione sta per intero. La regola e' la stessa perche' le
+     * due implementazioni rispondono alla stessa suite di contratto — se qui
+     * divergesse, il test lo direbbe subito.
+     */
+    if (tipoEdizione(pack.kind) === 'anteprima') return;
     // L'ultima giornata avanza sola: `greatest` evita che una rigenerazione di
     // una giornata vecchia faccia arretrare il puntatore.
     await this.pool.query(
@@ -244,10 +265,13 @@ export class PostgresLeagueStore implements LeagueStore {
     );
   }
 
-  async approveEdition(leagueId: string, matchday: number, at: string): Promise<boolean> {
+  async approveEdition(
+    leagueId: string, matchday: number, at: string, kind: EditionKind = 'giornale',
+  ): Promise<boolean> {
     const { rowCount } = await this.pool.query(
-      'update editions set approved_at = $3 where league_id = $1 and matchday = $2',
-      [leagueId, matchday, at],
+      'update editions set approved_at = $3 '
+      + 'where league_id = $1 and matchday = $2 and kind = $4',
+      [leagueId, matchday, at, kind],
     );
     return (rowCount ?? 0) === 1;
   }

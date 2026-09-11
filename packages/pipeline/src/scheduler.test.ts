@@ -156,12 +156,14 @@ describe('tick di consegna', () => {
      */
     const secondo = await tick({ store });
     expect(secondo.esiti[0]?.motivo).toMatch(/già presente/);
-    expect(await store.listEditions('lega-1')).toEqual([1]);
+    expect(await store.listEditions('lega-1')).toEqual([{ matchday: 1, kind: 'giornale' }]);
 
     // E con la configurazione aggiornata va avanti, invece di restare fermo.
     const terzo = await tick({ store, leghe: [lega({ lastMatchday: 1 })] });
     expect(terzo.esiti[0]?.azione).toBe('pubblicata');
-    expect(await store.listEditions('lega-1')).toEqual([2, 1]);
+    expect(await store.listEditions('lega-1')).toEqual([
+      { matchday: 2, kind: 'giornale' }, { matchday: 1, kind: 'giornale' },
+    ]);
   });
 
   it('il guasto di una lega non ferma le altre', async () => {

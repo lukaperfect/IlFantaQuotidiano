@@ -4,7 +4,7 @@ import { store } from '@/lib/store';
 import { requireAccount } from '@/lib/session';
 import { edizioneLeggibile } from '@fantacomics/pipeline';
 import {
-  rigeneraLink, generaChiaveEstensione, revocaChiaveEstensione, approvaEdizione,
+  rigeneraLink, generaChiaveEstensione, revocaChiaveEstensione, approvaEdizione, generaVigilia,
 } from '@/app/actions';
 import { ConfigForm } from './config-form';
 
@@ -19,12 +19,16 @@ export default async function Lega({ params }: { params: Promise<{ id: string }>
   const config = await store.getConfigForOwner(id, account.accountId);
   if (!config) notFound();
 
-  const matchdays = await store.listEditions(id);
+  // Le rose bastano a fare un numero di vigilia: se ci sono, si offre.
+  const rose = await store.getRoster(id);
+  const refs = await store.listEditions(id);
   const editions = await Promise.all(
-    matchdays.map(async (n) => {
-      const published = await store.getEdition(id, n);
+    refs.map(async ({ matchday: n, kind }) => {
+      const published = await store.getEdition(id, n, kind);
       return {
         n,
+        kind,
+        vigilia: kind === 'anteprima',
         edition: published?.edition ?? null,
         leggibile: published ? edizioneLeggibile(published) : false,
         approvata: published?.approvedAt ?? null,
@@ -42,15 +46,26 @@ export default async function Lega({ params }: { params: Promise<{ id: string }>
         <h1>{config.leagueName}</h1>
       </header>
 
+      {rose ? (
+        <form action={generaVigilia} className="row">
+          <input type="hidden" name="leagueId" value={config.leagueId} />
+          <button className="btn" type="submit">
+            Fai uscire il numero di vigilia (giornata {(config.lastMatchday ?? 0) + 1})
+          </button>
+        </form>
+      ) : null}
+
       <h2>Edizioni</h2>
       {editions.length === 0 ? (
         <p className="muted">Nessuna edizione ancora pubblicata.</p>
       ) : (
         <ul className="card-list">
-          {editions.map(({ n, edition, leggibile, approvata }) => (
-            <li key={n} className="item">
+          {editions.map(({ n, kind, vigilia, edition, leggibile, approvata }) => (
+            /* La chiave include il tipo: le due uscite della settimana hanno la
+               stessa giornata, e con la sola giornata React ne mostrerebbe una. */
+            <li key={`${n}-${kind}`} className="item">
               <span>
-                <strong>Giornata {n}</strong>
+                <strong>{vigilia ? `Vigilia della giornata ${n}` : `Giornata ${n}`}</strong>
                 <br />
                 <span className="muted small">
                   {edition
@@ -64,8 +79,15 @@ export default async function Lega({ params }: { params: Promise<{ id: string }>
               <span className="row">
                 {leggibile ? (
                   <>
-                    <Link className="btn" href={`/g/${config.publicSlug}/${n}`}>Leggi</Link>
-                    {edition?.personalCards[0] ? (
+                    <Link
+                      className="btn"
+                      href={vigilia
+                        ? `/g/${config.publicSlug}/${n}/vigilia`
+                        : `/g/${config.publicSlug}/${n}`}
+                    >
+                      Leggi
+                    </Link>
+                    {!vigilia && edition?.personalCards[0] ? (
                       <Link
                         className="btn"
                         href={`/g/${config.publicSlug}/${n}/card/${edition.personalCards[0].teamId}`}
@@ -79,12 +101,16 @@ export default async function Lega({ params }: { params: Promise<{ id: string }>
                     {/* L'anteprima passa dall'id interno e dalla sessione, non
                         dallo slug: chi ha il link condiviso non deve poter
                         aprire una bozza. */}
-                    <Link className="btn" href={`/lega/${config.leagueId}/anteprima/${n}`}>
+                    <Link
+                      className="btn"
+                      href={`/lega/${config.leagueId}/anteprima/${n}?tipo=${kind}`}
+                    >
                       Rivedi
                     </Link>
                     <form action={approvaEdizione}>
                       <input type="hidden" name="leagueId" value={config.leagueId} />
                       <input type="hidden" name="matchday" value={n} />
+                      <input type="hidden" name="tipo" value={kind} />
                       <button className="btn btn--primary" type="submit">
                         Pubblica lo stesso
                       </button>

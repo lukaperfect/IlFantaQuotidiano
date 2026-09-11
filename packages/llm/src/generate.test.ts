@@ -7,7 +7,9 @@ import { generateWorld, withOfficialScores, nudgeTeamToScore } from '@fantacomic
 import { generateEdition, computeConfidence, type GenerateOptions, type ArticleOutcome } from './generate.js';
 import { TemplateDriver } from './template-driver.js';
 import { SYSTEM_PROMPT, PROMPT_VERSION } from './system-prompt.js';
-import { buildMessageParams, MODELS, DEFAULT_ROUTING } from './anthropic-driver.js';
+import {
+  buildMessageParams, buildArticlePrompt, MODELS, DEFAULT_ROUTING,
+} from './anthropic-driver.js';
 import { articleJsonSchema } from './schema.js';
 import { textOfBlocks } from './grounding.js';
 import type { ArticleDraft, ArticleRequest, CardRequest, CardsDraft, LlmDriver } from './driver.js';
@@ -436,5 +438,173 @@ describe('il routing dei modelli', () => {
   it('copre tutti gli slot: uno scoperto resterebbe senza modello', () => {
     const slot = ['apertura', 'spalla', 'serie_a', 'interno', 'taglio_basso', 'rubrica'];
     for (const s of slot) expect(DEFAULT_ROUTING[s as keyof typeof DEFAULT_ROUTING]).toBeTruthy();
+  });
+});
+
+describe('la direttiva dell\'anteprima', () => {
+  const richiesta = (kind?: 'giornale' | 'anteprima') => buildMessageParams({
+    model: MODELS.sonnet, slot: 'apertura', schema: articleJsonSchema(),
+    spice: 2, userText: 'dati', maxTokens: 2048,
+    ...(kind ? { kind } : {}),
+  });
+
+  /**
+   * Le direttive, DA QUALUNQUE canale arrivino.
+   *
+   * Il canale dipende dal modello — system a meta' conversazione dove e'
+   * accettato, altrimenti un blocco delimitato dentro il messaggio utente — e
+   * quale dei due sia lo verifica un altro test. Qui interessa che la direttiva
+   * ci arrivi: legarsi al canale farebbe passare questo test mentre il modello
+   * non riceve niente.
+   */
+  const direttive = (p: ReturnType<typeof richiesta>): string =>
+    (p.messages as { role: string; content: unknown }[])
+      .map((m) => (typeof m.content === 'string'
+        ? m.content
+        : (m.content as { text?: string }[]).map((b) => b.text ?? '').join('\n')))
+      .join('\n');
+
+  it('dice al modello che non si e\' ancora giocato', () => {
+    /**
+     * Senza istruzione esplicita il pezzo esce al passato: i fatti d'asta SONO
+     * al passato («ha pagato 460») anche quando la partita e' domani, e il
+     * modello non ha modo di dedurre il tempo verbale del numero.
+     */
+    const testo = direttive(richiesta('anteprima'));
+    expect(testo).toContain('ANTEPRIMA');
+    expect(testo).toMatch(/nessuna partita e' ancora stata giocata/);
+    // Il livello di piccante resta: le due direttive si sommano, non si escludono.
+    expect(testo).toMatch(/piccante/i);
+  });
+
+  it('e non la dice quando il numero e\' un retrospettivo', () => {
+    expect(direttive(richiesta('giornale'))).not.toContain('ANTEPRIMA');
+    // Nessun tipo passato equivale a un retrospettivo: e' cio' che chiedeva
+    // ogni chiamante scritto prima che l'anteprima esistesse.
+    expect(direttive(richiesta())).not.toContain('ANTEPRIMA');
+  });
+
+  it('NON tocca il prefisso congelato: e\' la cache che paga il prezzo', () => {
+    /**
+     * Due prefissi diversi significano due voci di cache, cioe' un cold miss a
+     * ogni alternanza fra vigilia e retrospettivo — che e' esattamente il ritmo
+     * del prodotto, due uscite a settimana una per tipo. Il costo per edizione
+     * sta dentro 4,99 euro a stagione solo se il prefisso resta uno.
+     */
+    expect(JSON.stringify(richiesta('anteprima').system))
+      .toBe(JSON.stringify(richiesta('giornale').system));
+  });
+
+  it('il contesto del prompt porta le partite in programma', () => {
+    const prompt = buildArticlePrompt({
+      slot: 'apertura', formatId: 'presentazione_sfida', formatLabel: 'La sfida',
+      formatBrief: 'brief', personaName: 'Analista', personaVoice: 'voce',
+      facts: [], leagueName: 'Lega', matchday: 7, spice: 2,
+      kind: 'anteprima',
+      fixtures: [{ homeTeam: 'Alfa', awayTeam: 'Beta' }],
+    });
+    expect(prompt).toContain("ANTEPRIMA, non si e' ancora giocato");
+    expect(prompt).toContain('<partite_in_programma>');
+    expect(prompt).toContain('Alfa — Beta');
+  });
+
+  it('un retrospettivo non si porta dietro nessun elenco di partite', () => {
+    const prompt = buildArticlePrompt({
+      slot: 'apertura', formatId: 'apertura_drammatica', formatLabel: 'Apertura',
+      formatBrief: 'brief', personaName: 'Analista', personaVoice: 'voce',
+      facts: [], leagueName: 'Lega', matchday: 7, spice: 2,
+      // Anche se gli si passassero, il tabellino di un retrospettivo sta nei
+      // fatti e non in un elenco a parte.
+      fixtures: [{ homeTeam: 'Alfa', awayTeam: 'Beta' }],
+    });
+    expect(prompt).not.toContain('<partite_in_programma>');
+    expect(prompt).toContain('giornata: 7');
+  });
+});
+
+describe('cosa arriva al driver per un numero di vigilia', () => {
+  /** Registra le richieste e delega il testo al driver template. */
+  class DriverSpia implements LlmDriver {
+    readonly name = 'spia';
+    readonly articoli: ArticleRequest[] = [];
+    readonly card: CardRequest[] = [];
+    private readonly dentro = new TemplateDriver();
+    async article(req: ArticleRequest): Promise<ArticleDraft> {
+      this.articoli.push(req);
+      return this.dentro.article(req);
+    }
+    async personalCards(req: CardRequest): Promise<CardsDraft> {
+      this.card.push(req);
+      return this.dentro.personalCards(req);
+    }
+  }
+
+  /** Lo stesso scenario del retrospettivo, ma il pack si dichiara anteprima. */
+  function vigilia() {
+    const s = scenario();
+    return {
+      ...s,
+      pack: {
+        ...s.pack,
+        kind: 'anteprima' as const,
+        results: [],
+        fixtures: [{ homeTeam: 'Alfa', awayTeam: 'Beta' }],
+      },
+    };
+  }
+
+  it('ogni richiesta di pezzo porta il tipo e le partite in programma', async () => {
+    /**
+     * E' il passaggio che rende gli articoli al futuro. Senza, il driver non
+     * riceve nessun tipo, la direttiva d'anteprima non viene aggiunta e i pezzi
+     * escono come se il turno fosse finito — «la sconfitta di ieri» su una
+     * giornata non giocata. Niente lo segnala: il giornale esce, e' solo
+     * sbagliato.
+     */
+    const s = vigilia();
+    const spia = new DriverSpia();
+    await generateEdition({
+      plan: s.plan, pack: s.pack, teamNames: s.teamNames,
+      driver: spia, rulesetVersion: R.version, degraded: false,
+    } as GenerateOptions);
+
+    expect(spia.articoli.length).toBeGreaterThan(0);
+    for (const r of spia.articoli) {
+      expect(r.kind).toBe('anteprima');
+      expect(r.fixtures).toEqual([{ homeTeam: 'Alfa', awayTeam: 'Beta' }]);
+    }
+  });
+
+  it('un retrospettivo non dichiara nessun tipo speciale', async () => {
+    const s = scenario();
+    const spia = new DriverSpia();
+    await generateEdition({
+      plan: s.plan, pack: s.pack, teamNames: s.teamNames,
+      driver: spia, rulesetVersion: R.version, degraded: false,
+    } as GenerateOptions);
+    for (const r of spia.articoli) expect(r.kind).toBe('giornale');
+  });
+
+  it('senza card da scrivere il modello non viene interpellato affatto', async () => {
+    /**
+     * Il piano di una vigilia non produce card. Chiedere al modello di
+     * scriverne zero costerebbe comunque un giro completo di prompt per
+     * ricevere un elenco vuoto: su settantasei uscite a stagione per lega e'
+     * spesa pura contro un prezzo di 4,99 euro.
+     */
+    const s = vigilia();
+    const spia = new DriverSpia();
+    const res = await generateEdition({
+      plan: { ...s.plan, personalCards: [] }, pack: s.pack, teamNames: s.teamNames,
+      driver: spia, rulesetVersion: R.version, degraded: false,
+    } as GenerateOptions);
+    expect(spia.card).toHaveLength(0);
+    expect(res.edition.personalCards).toEqual([]);
+    /**
+     * E nessuna voce fantasma nel conto dei consumi: un consumo per pezzo, e
+     * NIENTE per le card. Il driver template non riporta consumi (non costa
+     * niente), quindi le voci sono nulle — cio' che conta e' quante sono.
+     */
+    expect(res.usages).toHaveLength(res.edition.articles.length);
   });
 });

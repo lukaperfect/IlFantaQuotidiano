@@ -1,8 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { Block, NarrativeFact, Slot } from '@fantacomics/core';
+import type { Block, EditionKind, NarrativeFact, Slot } from '@fantacomics/core';
 import { ArticleSchema } from '@fantacomics/core';
 import { z } from 'zod';
-import { PROMPT_VERSION, SYSTEM_PROMPT, spiceDirective } from './system-prompt.js';
+import { PROMPT_VERSION, SYSTEM_PROMPT, spiceDirective, anteprimaDirective } from './system-prompt.js';
 import { articleJsonSchema, personalCardsJsonSchema, FORMAT_BLOCK_KINDS } from './schema.js';
 import type {
   ArticleDraft, ArticleRequest, CardDraft, CardRequest, CardsDraft, LlmDriver, Usage,
@@ -54,6 +54,25 @@ const EFFORT: Partial<Record<Slot, 'low' | 'medium' | 'high' | 'xhigh' | 'max'>>
 };
 
 /** Solo alcuni modelli accettano istruzioni operatore a metà conversazione. */
+/**
+ * Chi accetta un messaggio `role: "system"` in mezzo alla conversazione.
+ *
+ * ATTENZIONE A COSA IMPLICA OGGI. Da quando il routing sta su Sonnet e Haiku —
+ * la scelta che tiene il costo dentro 4,99 euro a lega per stagione — questo
+ * insieme non contiene nessuno dei modelli effettivamente usati: le direttive
+ * operatore viaggiano tutte nel ramo di sotto, cioe' DENTRO il messaggio utente,
+ * delimitate da `<direttiva_operatore>`. E' lo stesso messaggio che porta i nomi
+ * scelti dagli utenti, quindi il canale non e' piu' quello «non falsificabile»
+ * di cui parla il commento di `buildMessageParams`.
+ *
+ * Cio' che regge la garanzia al suo posto e' la sanificazione dei nomi
+ * (`sanitizeUserText` neutralizza i pattern di prompt injection prima che
+ * arrivino qui) piu' l'istruzione nel prefisso congelato che dice al modello di
+ * trattare i nomi come dati. E' una difesa piu' debole di un canale separato:
+ * quando sara' verificato che Sonnet e Haiku accettano il system a meta'
+ * conversazione, vanno aggiunti qui — non prima, perche' inserirlo a indovinare
+ * farebbe rifiutare ogni richiesta.
+ */
 const SUPPORTS_MIDCONV_SYSTEM = new Set<string>([MODELS.opus]);
 /** `effort` non è accettato da Haiku 4.5. */
 const SUPPORTS_EFFORT = new Set<string>([MODELS.opus, MODELS.sonnet]);
@@ -99,6 +118,7 @@ export class AnthropicDriver implements LlmDriver {
         slot: req.slot,
         schema,
         spice: req.spice,
+        ...(req.kind ? { kind: req.kind } : {}),
         userText: buildArticlePrompt(req),
       }),
     );
@@ -126,6 +146,7 @@ export class AnthropicDriver implements LlmDriver {
         slot: 'rubrica',
         schema: personalCardsJsonSchema(),
         spice: req.spice,
+        ...(req.kind ? { kind: req.kind } : {}),
         userText: buildCardsPrompt(req),
       }),
     );
@@ -144,6 +165,7 @@ export type BuildArgs = {
   schema: Record<string, unknown>;
   spice: 1 | 2 | 3;
   userText: string;
+  kind?: EditionKind;
 };
 
   /**
@@ -157,7 +179,16 @@ export function buildMessageParams(
   args: BuildArgs & { maxTokens: number },
 ): Anthropic.MessageCreateParamsNonStreaming {
     const { model, slot, schema, spice, userText } = args;
-    const directive = spiceDirective(spice);
+    /**
+     * Le direttive operatore si CONCATENANO su un canale solo. Mandarle in due
+     * messaggi system separati funzionerebbe, ma il numero di blocchi diventa
+     * variabile e ogni variazione della forma dei messaggi e' un modo in piu'
+     * di rompere per distrazione qualcosa che si vede solo in fattura.
+     */
+    const directive = [
+      ...(args.kind === 'anteprima' ? [anteprimaDirective()] : []),
+      spiceDirective(spice),
+    ].join('\n\n');
 
     const messages: Anthropic.MessageParam[] = [
       { role: 'user', content: [{ type: 'text', text: userText }] },
@@ -224,11 +255,22 @@ function usageOf(response: Anthropic.Message, model: string): Usage {
 
 /** I dati della lega, delimitati ed etichettati come dati. */
 export function buildArticlePrompt(req: ArticleRequest): string {
+  const vigilia = req.kind === 'anteprima';
   return [
     '<contesto>',
     `lega: ${req.leagueName}`,
-    `giornata: ${req.matchday}`,
+    vigilia
+      ? `giornata: ${req.matchday} — ANTEPRIMA, non si e' ancora giocato`
+      : `giornata: ${req.matchday}`,
     '</contesto>',
+    ...(vigilia && req.fixtures && req.fixtures.length > 0
+      ? [
+        '',
+        '<partite_in_programma>',
+        ...req.fixtures.map((f) => `${f.homeTeam} — ${f.awayTeam}`),
+        '</partite_in_programma>',
+      ]
+      : []),
     '',
     '<fatti_verificati>',
     'Questi sono gli UNICI numeri che puoi usare.',

@@ -123,6 +123,10 @@ export async function generateEdition(opts: GenerateOptions): Promise<GenerateRe
       leagueName: pack.leagueName,
       matchday: pack.matchday,
       spice,
+      kind: pack.kind,
+      // Solo l'anteprima li ha: in un retrospettivo `fixtures` e' vuoto e il
+      // tabellino sta nei fatti.
+      fixtures: pack.fixtures,
       allowedBlockKinds: FORMAT_BLOCK_KINDS[planned.format.id],
     };
 
@@ -189,6 +193,7 @@ export async function generateEdition(opts: GenerateOptions): Promise<GenerateRe
     leagueName: pack.leagueName,
     matchday: pack.matchday,
     spice,
+    kind: pack.kind,
     cards: plan.personalCards.map((c) => ({
       teamId: c.teamId,
       teamName: opts.teamNames.get(c.teamId) ?? c.teamId,
@@ -197,8 +202,19 @@ export async function generateEdition(opts: GenerateOptions): Promise<GenerateRe
     })),
   };
 
-  let cardsDraft;
-  try {
+  /**
+   * NESSUNA CARD, NESSUNA CHIAMATA. Il piano di un'anteprima non produce card
+   * (vedi il selettore), e chiedere al modello di scriverne zero costerebbe
+   * comunque un giro completo di prompt per ricevere un elenco vuoto: su
+   * settantasei uscite a stagione per lega e' spesa pura contro un prezzo di
+   * 4,99 euro.
+   */
+  let cardsDraft: Awaited<ReturnType<LlmDriver['personalCards']>> = {
+    cards: [], usage: null, producedBy: 'nessuna',
+  };
+  if (plan.personalCards.length === 0) {
+    // Niente da generare: si salta, e non si registra nessun consumo.
+  } else try {
     cardsDraft = await driver.personalCards(cardRequest);
     const allowed = allowedNumbersFor(plan.personalCards.map((c) => c.fact), [String(pack.matchday)]);
     if (!checkGrounding(cardsDraft.cards.map((c) => `${c.headline} ${c.body} ${c.statValue}`).join('\n'), allowed).ok) {
@@ -207,7 +223,7 @@ export async function generateEdition(opts: GenerateOptions): Promise<GenerateRe
   } catch {
     cardsDraft = await fallback.personalCards(cardRequest);
   }
-  usages.push(cardsDraft.usage);
+  if (plan.personalCards.length > 0) usages.push(cardsDraft.usage);
 
   const toneById = new Map(plan.personalCards.map((c) => [c.teamId, c.tone]));
   const personalCards = cardsDraft.cards.map((c) => ({
@@ -230,6 +246,9 @@ export async function generateEdition(opts: GenerateOptions): Promise<GenerateRe
       leagueName: pack.leagueName,
       season: pack.season,
       matchday: pack.matchday,
+      // Il tipo viaggia dal pack ai metadati: da qui in poi l'edizione sa da
+      // sola che numero e', senza bisogno del pack accanto.
+      kind: pack.kind,
       publishedAt: opts.publishedAt ?? new Date().toISOString(),
       factEngineVersion: FACT_ENGINE_VERSION,
       promptVersion: PROMPT_VERSION,
@@ -241,7 +260,14 @@ export async function generateEdition(opts: GenerateOptions): Promise<GenerateRe
     },
     masthead: {
       title: 'FantaComics',
-      tagline: `${pack.leagueName} · Giornata ${pack.matchday}`.slice(0, 120),
+      /**
+       * La testata dice quale dei due numeri e' questo. Non e' cosmetica: le
+       * due uscite della settimana parlano della STESSA giornata, e un lettore
+       * che trova due volte «Giornata 12» non sa quale ha in mano.
+       */
+      tagline: (pack.kind === 'anteprima'
+        ? `${pack.leagueName} · Vigilia della giornata ${pack.matchday}`
+        : `${pack.leagueName} · Giornata ${pack.matchday}`).slice(0, 120),
     },
     articles,
     personalCards,

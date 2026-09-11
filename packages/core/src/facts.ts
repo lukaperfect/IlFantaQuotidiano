@@ -58,6 +58,41 @@ export const FactTypeSchema = z.enum([
   // --- Forma del match ---
   'GOLEADA',
   'PAREGGIO_NOIOSO',
+
+  /**
+   * --- ANTEPRIMA: i fatti che esistono PRIMA che si giochi ---
+   *
+   * Sono una famiglia separata perche' rispondono a una domanda diversa. Tutti
+   * gli altri fatti nascono dai risultati; questi devono stare in piedi la
+   * mattina in cui le partite non sono ancora cominciate, quando di certo si ha
+   * solo cio' che l'asta ha deciso e cio' che lo storico ha accumulato.
+   *
+   * I nomi contano piu' del solito: il tipo del fatto viene scritto nel
+   * prompt, quindi un nome che promette un dato inesistente e' un invito a
+   * inventarlo. «CREDITI_AVANZATI» sarebbe stato uno: il file delle rose dice
+   * quanto una squadra ha SPESO, non quale fosse il budget, e nessuno dei due
+   * si deduce dall'altro. Da qui «ASTA_AL_RISPARMIO», che dice esattamente
+   * cio' che si sa — ha speso meno degli altri.
+   *
+   * I primi sei si ricavano dalle sole rose: esistono dal giorno in cui
+   * l'admin carica il file, cioe' anche per la primissima edizione di una lega
+   * che non ha ancora giocato niente. E' il caso che governa il progetto —
+   * quella e' la prima pagina che un cliente pagante vede.
+   */
+  'RE_DELL_ASTA',
+  'PEZZO_PREGIATO',
+  'ASTA_AL_RISPARMIO',
+  'ATTACCO_PIU_COSTOSO',
+  'PORTA_LOW_COST',
+  'ASTA_SPALMATA',
+  /** Gli accoppiamenti: esistono dal calendario, anche a giornata 1. */
+  'SFIDA_IN_PROGRAMMA',
+  /** Questi cinque chiedono lo storico: dalla seconda giornata in poi. */
+  'SCONTRO_AL_VERTICE',
+  'SCONTRO_DI_CODA',
+  'CONTI_APERTI',
+  'STRISCIA_APERTA',
+  'CRISI_APERTA',
 ]);
 export type FactType = z.infer<typeof FactTypeSchema>;
 
@@ -106,6 +141,17 @@ export const NarrativeFactSchema = z.object({
 });
 export type NarrativeFact = z.infer<typeof NarrativeFactSchema>;
 
+/**
+ * Che numero e' questo.
+ *
+ * `giornale` esce la mattina dopo l'ultima partita e racconta cosa e'
+ * successo. `anteprima` esce la mattina in cui si comincia a giocare e non ha
+ * un solo risultato da citare: al posto del tabellino porta gli scontri in
+ * programma.
+ */
+export const EditionKindSchema = z.enum(['giornale', 'anteprima']);
+export type EditionKind = z.infer<typeof EditionKindSchema>;
+
 /** Il pacchetto che viene passato all'LLM: fatti + anagrafica minima, nient'altro. */
 export const FactPackSchema = z.object({
   leagueId: z.string().min(1),
@@ -113,6 +159,12 @@ export const FactPackSchema = z.object({
   matchday: z.number().int().min(1).max(38),
   season: z.string(),
   factEngineVersion: z.string().min(1),
+  /**
+   * Predefinito `giornale` di proposito: tutto cio' che esisteva prima di
+   * questo campo e' un retrospettivo, e un pacchetto salvato ieri deve
+   * continuare a rileggersi senza migrazioni.
+   */
+  kind: EditionKindSchema.default('giornale'),
   facts: z.array(NarrativeFactSchema),
   /** Risultati della giornata, per il tabellino. */
   results: z.array(z.object({
@@ -123,6 +175,14 @@ export const FactPackSchema = z.object({
     homeGoals: z.string(),
     awayGoals: z.string(),
   })),
+  /**
+   * Gli scontri IN PROGRAMMA, per l'anteprima. Nessun punteggio: non esiste
+   * ancora. Vuoto su un retrospettivo, dove il tabellino sta in `results`.
+   */
+  fixtures: z.array(z.object({
+    homeTeam: z.string(),
+    awayTeam: z.string(),
+  })).default([]),
   standings: z.array(z.object({
     position: z.string(),
     teamName: z.string(),

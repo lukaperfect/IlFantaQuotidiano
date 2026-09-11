@@ -4,10 +4,12 @@ Genera automaticamente un giornale sportivo satirico personalizzato per ogni
 lega di fantacalcio, a partire dai dati ufficiali della giornata.
 
 > **Stato**: prodotto funzionante end-to-end, con account, isolamento fra
-> proprietari e persistenza su Postgres. Un admin accede, collega una lega,
-> genera le edizioni e condivide il giornale con un link revocabile. Manca
-> l'adapter verso una piattaforma reale e la consegna automatica: vedi
-> [Cosa manca](#cosa-manca).
+> proprietari e persistenza su Postgres. Un admin accede, carica il file delle
+> rose e ha subito il primo numero; collegata la fonte, le edizioni escono da
+> sole. Escono in **due tipi**: la *vigilia* la mattina in cui si comincia a
+> giocare e il *retrospettivo* la mattina dopo l'ultima partita. Manca il
+> pagamento e la pianificazione delle due uscite sugli orari veri di Serie A:
+> vedi [Cosa manca](#cosa-manca).
 
 ## La tesi architetturale
 
@@ -342,6 +344,113 @@ tutte.
 Misurato sul file di una lega vera: 10 squadre, 250 giocatori, 250 chiavi
 distinte, zero collisioni, e il `totale` che combacia su 10 blocchi su 10.
 
+## Le due uscite della settimana
+
+Il giornale esce due volte per giornata, e i due numeri non sono lo stesso
+giornale con piu' o meno dati dentro: sono due prodotti diversi.
+
+| | **Vigilia** (`anteprima`) | **Retrospettivo** (`giornale`) |
+|---|---|---|
+| Quando | la mattina in cui si comincia a giocare | la mattina dopo l'ultima partita |
+| Materia | asta, calendario, classifica, storico | voti, formazioni, punteggi, rimpianti |
+| Tabellino | le partite in programma, senza punteggi | i risultati |
+| Card personali | nessuna | una per presidente |
+| Indirizzo | `/g/<slug>/<n>/vigilia` | `/g/<slug>/<n>` |
+| Mazzo dei format | 16 carte, 3 nate per la vigilia | 24 carte |
+
+### Il caso che governa il progetto
+
+La primissima edizione che un cliente pagante vede e' una vigilia di una lega
+**senza storia**: ha solo le rose appena caricate. Se la si lascia dipendere
+dallo storico, quel numero esce vuoto proprio al cliente appena acquisito.
+
+Cio' che salva quella pagina e' l'asta, perche' un'asta e' gia' una storia
+completa e verificata — il file porta con se' la riga `totale` che ne fa da
+somma di controllo. Misurato sul file vero di una lega da dieci squadre: **13
+fatti, tutte e dieci le squadre nominate, sei pezzi**, senza una sola partita
+giocata e senza calendario.
+
+### L'asta invecchia, e deve
+
+I fatti d'asta hanno un difetto che nessun altro fatto ha: sono gli **stessi
+ogni settimana**. Martinez L. e' costato 460 crediti alla prima giornata e gli
+stessi 460 alla trentesima. Con settantasei uscite a stagione, a peso pieno il
+giornale ripeterebbe se stesso dalla terza — ed e' il rischio numero uno del
+prodotto, non l'allucinazione: la noia. Il cooldown sul tipo di fatto non basta,
+smorza per quattro giornate e poi il fatto torna identico.
+
+Quindi il peso dei fatti d'asta decade con le giornate **giocate da quella
+lega** (non con il numero della giornata: una lega iscritta a dicembre ha
+l'asta come notizia fresca). Misurato, la quota d'asta in pagina:
+
+| Giornate giocate | 0 | 0 (con calendario) | 5 | 15 |
+|---|---|---|---|---|
+| Quota d'asta | 100% | 81% | 40% | 37% |
+
+A stagione avviata la notizia e' chi arriva con quattro vittorie di fila, e
+«chi ha pagato 460 in agosto» e' un trafiletto.
+
+### Il tipo fa parte della chiave dell'edizione
+
+Le due uscite parlano della **stessa giornata**. Con la sola giornata come
+chiave la seconda sovrascriveva la prima e il cliente perdeva un numero su due,
+senza alcun errore: la chiave e' `(lega, giornata, tipo)` su entrambe le
+implementazioni dello store, e la suite di contratto lo verifica.
+
+Da qui una regola che vive nello store e non nel chiamante: **solo il
+retrospettivo fa avanzare `lastMatchday`**. Quel campo dice al pianificatore
+quale giornata consegnare la prossima volta; se la vigilia della 12 lo portasse
+a 12, il retrospettivo della 12 — il numero con i risultati — non uscirebbe
+mai, e il guasto sarebbe indistinguibile dal funzionamento normale.
+
+### I format dichiarano in quale numero valgono
+
+Il mazzo era interamente retrospettivo: «necrologio», «epigrafe per i punti
+lasciati in panchina», «il processo del lunedi'», «tabellino commentato».
+Un necrologio per una squadra che non ha ancora giocato non sta in piedi, e il
+modo in cui si sbaglia e' silenzioso — nessun test se ne accorge, la pagina e'
+assurda solo per chi la legge.
+
+Ogni carta dichiara quindi `edizioni`, e il campo e' **obbligatorio**: un campo
+facoltativo con un valore predefinito avrebbe lasciato che la prossima carta
+entrasse nel mazzo senza che nessuno scegliesse. Il tempo verbale non e'
+deducibile dalla polarita' — una tragedia si racconta prima («arriva con quattro
+sconfitte di fila») o dopo («ha perso per mezzo punto») — ed e' per questo che
+serve un campo a parte. Un test strutturale verifica che ogni slot
+dell'impaginato abbia almeno una carta per ciascun tipo di numero: uno slot
+scoperto non da' errore, da' un giornale senza prima pagina.
+
+Una carta puo' anche pretendere un'**ancora** precisa. «La sfida di giornata»
+promette due squadre che si incontrano: dato un fatto d'asta e nessun
+accoppiamento scriverebbe di uno scontro che non ha, ed e' esattamente cosi' che
+apriva il giornale prima del vincolo.
+
+### Il budget di fatti
+
+Un retrospettivo ha 43-48 fatti, una vigilia 13. Il selettore era tarato
+sull'abbondanza: un oroscopo da otto righe estratto per il secondo slot si
+mangiava il materiale dei sei pezzi successivi, che quindi non uscivano.
+Misurato, il giornale usciva con **quattro pezzi su otto slot**.
+
+Ogni pezzo ha adesso un budget — un fatto tenuto da parte per ogni slot che
+resta — e il budget **restringe la scelta del format, non la decide**: fra i
+format compatibili si preferiscono quelli che ci stanno, ma se nessuno ci sta si
+prende comunque un compatibile. Averlo messo come filtro duro faceva perdere la
+corrispondenza di polarita', cioe' produceva un necrologio su un trionfo: un
+pezzo magro esce un po' asciutto, uno con la polarita' sbagliata esce
+**sbagliato**.
+
+### La direttiva al modello, e perche' non sta nel prefisso congelato
+
+Un numero di vigilia va scritto al futuro, e il modello non lo puo' dedurre dai
+fatti: un fatto d'asta e' al passato («ha pagato 460») anche quando la partita
+e' domani. L'istruzione viaggia sul canale delle direttive operatore, lo stesso
+del livello di piccante, e **non** nel prefisso congelato: quel prefisso e'
+identico per ogni lega e ogni giornata, ed e' la ragione per cui il costo per
+edizione sta dentro 4,99 euro a stagione. Due prefissi diversi significano due
+voci di cache e un cold miss a ogni alternanza fra i due numeri — che e'
+esattamente il ritmo del prodotto.
+
 ## La consegna automatica: i dati della giornata arrivano da soli
 
 Il percorso da file resta, ed e' l'interruttore di emergenza. Ma un prodotto
@@ -484,22 +593,31 @@ mai stampata, nemmeno dentro l'URL in caso di errore.
 
 Per andare in produzione servono, nell'ordine:
 
-1. **Una chiave per un fornitore del piano globale.** La catena HTTP c'e' ed e'
+1. **Il pagamento**: Stripe, 4,99 euro una tantum per lega per stagione.
+   L'entitlement va sulla lega, non sull'account: chi paga per una lega non
+   paga per tutte. Da qui `api.stripe.com` non e' raggiungibile, quindi si
+   verifichera' contro un finto Stripe con firma del webhook vera.
+2. **La pianificazione delle due uscite** sugli orari veri di Serie A, non su
+   giorni fissi della settimana: la Serie A gioca anche il venerdi' e ha turni
+   infrasettimanali. La vigilia esce la mattina della prima partita, il
+   retrospettivo la mattina dopo l'ultima. Oggi la vigilia si fa uscire con un
+   comando dalla pagina della lega.
+3. **Una chiave per un fornitore del piano globale.** La catena HTTP c'e' ed e'
    verificata end-to-end; manca un profilo puntato su un servizio reale, che e'
    configurazione, non codice. Da fare con `ispeziona-fonte.ts` e una chiave.
    Nessuno di quei servizi da' il *voto*: quello resta all'estensione.
-2. **Un provider di posta vero**: il `Mailer` è un'interfaccia con
+4. **Un provider di posta vero**: il `Mailer` è un'interfaccia con
    implementazioni su console e su file. Serve collegarci un servizio prima di
    far accedere qualcuno che non sia sulla stessa macchina.
-3. **Consegna**: bot Telegram per l'automazione, PWA con Web Share API per la
+5. **Consegna**: bot Telegram per l'automazione, PWA con Web Share API per la
    condivisione su WhatsApp (l'API di WhatsApp non scrive nei gruppi: qualsiasi
    piano che lo assuma è irrealizzabile).
-4. **Fonte xG** con licenza commerciale verificata.
-5. **Revisione umana al 100%** per le prime settimane: è così che si costruisce
+6. **Fonte xG** con licenza commerciale verificata.
+7. **Revisione umana al 100%** per le prime settimane: è così che si costruisce
    il dataset di stile, non un ripiego.
-6. **pgvector** per la memoria semantica anti-ripetizione: oggi il cooldown è
+8. **pgvector** per la memoria semantica anti-ripetizione: oggi il cooldown è
    per tipo di fatto e per format, non per similarità del testo generato.
-7. **Il driver Anthropic contro l'API vera**: il codice c'è e l'assemblaggio
+9. **Il driver Anthropic contro l'API vera**: il codice c'è e l'assemblaggio
    della richiesta è testato, ma finora ha girato solo il driver template.
 
 ## Licenza e dati

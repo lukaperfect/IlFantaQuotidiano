@@ -1,5 +1,8 @@
 import type { Edition, FactPack } from '@fantacomics/core';
-import { buildContext, esc, renderArticle, renderMasthead, renderResults, renderStandings } from './html.js';
+import {
+  buildContext, esc, nomeDelNumero, renderArticle, renderFixtures, renderMasthead,
+  renderResults, renderStandings,
+} from './html.js';
 import { NEWSPAPER_CSS, PRINT_CSS } from './styles.js';
 
 export type PageOptions = {
@@ -34,8 +37,14 @@ export function renderPage(edition: Edition, pack: FactPack, opts: PageOptions =
     ...main.map((a) => renderArticle(a, ctx, persona(a.persona))),
     '</div>',
     '<div class="stack">',
-    `<div class="panel">${renderResults(ctx)}</div>`,
-    `<div class="panel">${renderStandings(ctx)}</div>`,
+    /**
+     * I pannelli si costruiscono solo se hanno contenuto. `filter(Boolean)`
+     * piu' in basso scarta le stringhe vuote, ma non un `<div class="panel">`
+     * che ne contiene una: un riquadro vuoto in pagina si vede.
+     */
+    ...[renderResults(ctx), renderFixtures(ctx), renderStandings(ctx)]
+      .filter((t) => t !== '')
+      .map((t) => `<div class="panel">${t}</div>`),
     ...aside.map((a) => renderArticle(a, ctx, persona(a.persona))),
     '</div>',
     '</div>',
@@ -44,7 +53,7 @@ export function renderPage(edition: Edition, pack: FactPack, opts: PageOptions =
     '</div>',
   ].filter(Boolean).join('\n');
 
-  const title = `${edition.masthead.title} · ${edition.meta.leagueName} · Giornata ${edition.meta.matchday}`;
+  const title = `${edition.masthead.title} · ${edition.meta.leagueName} · ${nomeDelNumero(edition)}`;
 
   return [
     '<!doctype html>',

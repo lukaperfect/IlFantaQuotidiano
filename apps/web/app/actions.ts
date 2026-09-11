@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 import { cookies } from 'next/headers';
 import { revalidatePath } from 'next/cache';
 import { DEFAULT_RULESET, LeagueRulesetSchema, safeName, stableHash } from '@fantacomics/core';
+import type { EditionKind } from '@fantacomics/core';
 import {
   issueMagicLink, consumeMagicLink, ConsoleMailer, FileMailer, randomToken,
   MAGIC_LINK_TTL_MS, type Mailer,
@@ -14,7 +15,7 @@ import {
   importFromFiles, generateWorld, withOfficialScores, nudgeTeamToScore, AdapterError,
   importaRoseXlsx,
 } from '@fantacomics/ingest';
-import { runMatchdayPipeline } from '@fantacomics/pipeline';
+import { runMatchdayPipeline, runAnteprimaPipeline } from '@fantacomics/pipeline';
 import { TemplateDriver, AnthropicDriver } from '@fantacomics/llm';
 import { store } from '@/lib/store';
 
@@ -403,6 +404,47 @@ export async function revocaChiaveEstensione(form: FormData): Promise<void> {
 }
 
 /**
+ * FA USCIRE IL NUMERO DI VIGILIA.
+ *
+ * Basta il file delle rose: non serve nessuna giornata giocata, nessun voto e
+ * nessun calendario. E' il comando che rende l'anteprima raggiungibile subito
+ * dopo il caricamento delle rose — il momento in cui un cliente che ha appena
+ * pagato deve vedere un giornale.
+ *
+ * Il calendario, quando arrivera' dalla fonte automatica, aggiungera' gli
+ * accoppiamenti; senza, il numero esce sui soli fatti d'asta. Non e' un
+ * ripiego: l'asta E' una storia, e alla prima giornata e' l'unica che esiste.
+ */
+export async function generaVigilia(form: FormData): Promise<void> {
+  const account = await requireAccount();
+  const leagueId = String(form.get('leagueId') ?? '');
+  const config = await store.getConfigForOwner(leagueId, account.accountId);
+  if (!config) redirect('/');
+
+  const roster = await store.getRoster(leagueId);
+  // Senza rose non c'e' materia: si torna indietro senza fingere di aver fatto.
+  if (!roster) redirect(`/lega/${leagueId}`);
+
+  await runAnteprimaPipeline({
+    leagueId,
+    leagueName: config.leagueName,
+    roster,
+    // La vigilia riguarda la giornata che si sta per giocare, cioe' quella
+    // DOPO l'ultimo retrospettivo pubblicato.
+    matchday: (config.lastMatchday ?? 0) + 1,
+    fixtures: [],
+    store,
+    rulesetVersion: config.ruleset.version,
+    spice: config.spice,
+    driver: process.env.ANTHROPIC_API_KEY ? new AnthropicDriver() : new TemplateDriver(),
+    fallback: new TemplateDriver(),
+  });
+
+  revalidatePath(`/lega/${leagueId}`);
+  redirect(`/lega/${leagueId}`);
+}
+
+/**
  * Approva un'edizione sotto soglia.
  *
  * Non alza la confidenza e non tocca il testo: registra che un umano l'ha
@@ -416,7 +458,14 @@ export async function approvaEdizione(form: FormData): Promise<void> {
   const config = await store.getConfigForOwner(leagueId, account.accountId);
   if (!config) redirect('/');
 
-  await store.approveEdition(leagueId, matchday, new Date().toISOString());
+  /**
+   * Il tipo arriva dal form e non si deduce: la vigilia e il retrospettivo
+   * della stessa giornata sono due edizioni, e un'approvazione che ignorasse
+   * il tipo pubblicherebbe quella sbagliata. Tutto cio' che non e' esattamente
+   * `anteprima` e' il retrospettivo, com'e' predefinito in ogni altro punto.
+   */
+  const tipo: EditionKind = form.get('tipo') === 'anteprima' ? 'anteprima' : 'giornale';
+  await store.approveEdition(leagueId, matchday, new Date().toISOString(), tipo);
   revalidatePath(`/lega/${leagueId}`);
   redirect(`/lega/${leagueId}`);
 }

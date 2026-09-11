@@ -1,6 +1,6 @@
-import type { NarrativeFact, Slot } from '@fantacomics/core';
+import type { EditionKind, NarrativeFact, Slot } from '@fantacomics/core';
 import { seededRandom } from '@fantacomics/core';
-import { FORMAT_DECK, type FormatCard } from './formats.js';
+import { mazzoPer, type FormatCard } from './formats.js';
 import { PERSONAS, type Persona } from './personas.js';
 import type { EditorialMemory } from './memory.js';
 
@@ -36,6 +36,12 @@ export type SelectionInput = {
   memory: EditorialMemory;
   spice?: SpiceLevel;
   targetArticles?: number;
+  /**
+   * Che numero e'. Predefinito `giornale`: tutto cio' che chiamava questa
+   * funzione prima che l'anteprima esistesse chiedeva un retrospettivo, e un
+   * default diverso cambierebbe in silenzio il significato di quelle chiamate.
+   */
+  kind?: EditionKind;
 };
 
 const NEGATIVE = new Set(['tragedia', 'farsa']);
@@ -222,25 +228,76 @@ function pickFormat(
   usedInEdition: Set<string>,
   rnd: () => number,
   warnings: string[],
+  /**
+   * IL MAZZO DELL'EDIZIONE, non l'intero deck. Il filtro sta qui e non a valle
+   * perche' questa funzione ha tre vie d'uscita — le due di ripiego incluse —
+   * e una sola di esse che guardi il deck completo basta a far uscire un
+   * necrologio in un'anteprima proprio quando il mazzo e' corto, cioe' nel
+   * caso in cui nessuno sta guardando.
+   */
+  mazzo: readonly FormatCard[],
+  /**
+   * QUANTI FATTI QUESTO PEZZO PUO' PERMETTERSI.
+   *
+   * Il mazzo contiene format da un fatto e format da otto, e senza questo
+   * vincolo la scelta li tratta allo stesso modo: un oroscopo da otto righe
+   * estratto per il secondo slot si mangia il materiale dei sei pezzi
+   * successivi, che quindi non escono. Sul retrospettivo non si vedeva —
+   * quaranta fatti bastano per tutti — ma la vigilia ne ha tredici, e misurato
+   * il giornale usciva con QUATTRO pezzi su otto slot.
+   *
+   * Il budget e' calcolato tenendo da parte un fatto per ogni slot che resta:
+   * meglio otto pezzi asciutti che quattro pezzi pieni e quattro buchi.
+   */
+  budget: number,
 ): FormatCard {
-  const eligible = FORMAT_DECK.filter((f) => {
+  const eligible = mazzo.filter((f) => {
     if (!f.slots.includes(slot)) return false;
     if (usedInEdition.has(f.id)) return false;
     if (!f.polarities.includes(anchor.polarity)) return false;
+    // Un format che pretende un'ancora precisa non si accontenta: e' un
+    // vincolo di MATERIALE, quindi vale anche nei ripieghi qui sotto.
+    if (f.richiedeAncora && !f.richiedeAncora.includes(anchor.type)) return false;
     const last = input.memory.lastFormatUse[f.id];
     return last === undefined || input.matchday - last >= f.cooldown;
   });
 
+  /**
+   * IL BUDGET RESTRINGE, NON DECIDE.
+   *
+   * Fra i format compatibili si preferiscono quelli che stanno nel materiale
+   * disponibile; se nessuno ci sta, si prende comunque un compatibile. Non e'
+   * indulgenza: un format che chiede tre fatti e ne riceve due esce un po'
+   * magro, mentre uno scelto ignorando la polarita' esce SBAGLIATO — un
+   * necrologio su un trionfo. Avevo messo il budget come filtro duro e questa
+   * era esattamente la conseguenza, colta da un test che quella garanzia la
+   * protegge da prima che l'anteprima esistesse.
+   */
+  const dentroBudget = eligible.filter((f) => f.minFacts <= budget);
+  let pool = dentroBudget.length > 0 ? dentroBudget : eligible;
+
   // Meglio riusare un format che non produrre il pezzo — ma il ripiego non
   // deve avvenire in silenzio: e' il primo sintomo di un mazzo troppo corto.
-  let pool = eligible;
   if (pool.length === 0) {
-    pool = FORMAT_DECK.filter((f) => f.slots.includes(slot) && !usedInEdition.has(f.id));
+    pool = mazzo.filter((f) => f.slots.includes(slot)
+      && !usedInEdition.has(f.id)
+      && (!f.richiedeAncora || f.richiedeAncora.includes(anchor.type)));
     warnings.push(`Slot ${slot}: nessun format disponibile senza forzare cooldown o polarita'.`);
   }
   if (pool.length === 0) {
     warnings.push(`Slot ${slot}: mazzo esaurito, format riusato nella stessa edizione.`);
-    return FORMAT_DECK[0] as FormatCard;
+    const primoDelloSlot = mazzo.find(
+      (f) => f.slots.includes(slot) && !f.richiedeAncora,
+    ) ?? mazzo.find((f) => f.slots.includes(slot)) ?? mazzo[0];
+    // Se anche questo mancasse, il mazzo dell'edizione non copre lo slot: e'
+    // un difetto di configurazione, e va detto invece che mascherato.
+    if (!primoDelloSlot) {
+      throw new Error(
+        `Nessun format dichiara di valere per lo slot "${slot}" in un'edizione `
+        + `di tipo "${input.kind ?? 'giornale'}".`,
+      );
+    }
+    return primoDelloSlot;
   }
 
   // Si preferisce il format fermo da più tempo: rotazione, non casualità.
@@ -281,6 +338,7 @@ export function planEdition(input: SelectionInput): EditorialPlan {
   const slots = slotPlan(target);
   const seed = `${input.leagueId}:${input.matchday}`;
   const rnd = seededRandom(seed);
+  const mazzo = mazzoPer(input.kind ?? 'giornale');
 
   const wanted = Math.min(input.facts.length, Math.max(slots.length * 2, 14));
   const selected = enforceConstraints(selectFacts(input, wanted), input, warnings);
@@ -343,7 +401,14 @@ export function planEdition(input: SelectionInput): EditorialPlan {
     const protagonist = protagonistOf(anchor);
     if (protagonist) anchored.add(protagonist);
 
-    const format = pickFormat(slot, anchor, input, usedFormats, rnd, warnings);
+    /**
+     * Un fatto da parte per ogni slot che resta, oltre a quello appena preso.
+     * `pool` e' gia' senza l'ancora, quindi conta solo il materiale di corredo.
+     */
+    const slotRimanenti = slots.length - articles.length - 1;
+    const budget = 1 + Math.max(0, pool.length - slotRimanenti);
+
+    const format = pickFormat(slot, anchor, input, usedFormats, rnd, warnings, mazzo, budget);
     usedFormats.add(format.id);
     const persona = pickPersona(input, usedPersonas, rnd);
     usedPersonas.add(persona.id);
@@ -355,7 +420,8 @@ export function planEdition(input: SelectionInput): EditorialPlan {
     const extras: NarrativeFact[] = [];
     const seenTeams = new Set(anchorTeams);
 
-    for (let i = 0; i < pool.length && extras.length < format.maxFacts - 1; i++) {
+    const maxCorredo = Math.min(format.maxFacts, budget) - 1;
+    for (let i = 0; i < pool.length && extras.length < maxCorredo; i++) {
       const cand = pool[i];
       if (!cand) continue;
       const candTeams = teamsOf(cand);
@@ -390,9 +456,21 @@ export function planEdition(input: SelectionInput): EditorialPlan {
     });
   }
 
-  // Una card personale per presidente: è ciò che moltiplica la condivisione.
+  /**
+   * Una card personale per presidente: è ciò che moltiplica la condivisione.
+   *
+   * MA NON NELLA VIGILIA. Una card si condivide perche' racconta la TUA
+   * giornata: «hai lasciato in panchina 12 punti», «hai vinto per mezzo
+   * punto». Prima che si giochi non esiste niente di simile, e cio' che
+   * uscirebbe l'ho visto in pagina: «Il colpo d'asta di ASD GERANI e' Paz N.,
+   * pagato 156 crediti», con il tono etichettato «Ordinaria amministrazione» e
+   * «La giornata giusta» — una giornata che non c'e' stata. Nessuno la manda
+   * nel gruppo, e una funzione di condivisione che nessuno usa non e' neutra:
+   * insegna che quel bottone non vale niente.
+   */
+  const senzaCard = (input.kind ?? 'giornale') === 'anteprima';
   const personalCards: PersonalCard[] = [];
-  for (const teamId of input.teamIds) {
+  for (const teamId of senzaCard ? [] : input.teamIds) {
     const byDrama = (a: NarrativeFact, b: NarrativeFact) => b.drama - a.drama;
     /**
      * La card personale deve raccontare la storia DI QUEL presidente.

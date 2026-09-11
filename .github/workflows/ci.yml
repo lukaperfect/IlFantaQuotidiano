@@ -88,6 +88,15 @@ jobs:
         # errore di tipo nell'app arriverebbe fino in produzione.
         run: pnpm --filter @fantacomics/web build
 
+      - name: Primo numero di una lega nuova, dal file delle rose vero
+        # E' il caso commerciale che governa il progetto: un admin paga, carica
+        # il foglio, e il giornale deve uscire — senza storico, senza voti e
+        # senza calendario. Parte dal file vero committato come fixture, e
+        # controlla anche cio' che l'anteprima NON deve fare: scrivere nello
+        # storico, sporcare il corpus della rarita' o far avanzare il puntatore
+        # delle giornate.
+        run: pnpm exec tsx apps/worker/src/scripts/verifica-anteprima.ts
+
       - name: Demo end-to-end
         # Il vero test di integrazione: la pipeline di produzione deve
         # produrre un giornale completo su piu' giornate consecutive.
@@ -180,11 +189,19 @@ jobs:
         # non c'e' nessuno a fermarla.
         run: pnpm exec tsx apps/worker/src/scripts/verifica-fonte.ts
 
-      - name: Rose dal foglio della piattaforma
-        # Senza argomento la verifica genera un foglio con la stessa forma di
-        # quello vero: il file di una lega reale non sta nel repository e non
-        # deve starci. Cio' che si verifica qui e' il percorso, non i dati.
-        run: pnpm exec tsx apps/web/verifica-rose.mjs
+      - name: Rose dal foglio della piattaforma, e primo numero
+        # Il file vero sta nel repository come fixture (lo ha autorizzato il
+        # proprietario della lega), e questa verifica lo carica davvero
+        # guidando il browser. Senza argomento usa un foglio generato con la
+        # stessa forma, cosi' vale anche dove il file non ci fosse.
+        #
+        # Arriva fino al primo numero: si preme il comando che fa uscire la
+        # vigilia e si legge il giornale all'indirizzo pubblico. Verifica anche
+        # che l'indirizzo del retrospettivo resti un 404, cioe' che i due
+        # numeri della settimana siano due risorse e non una sovrascritta.
+        run: >-
+          pnpm exec tsx apps/web/verifica-rose.mjs
+          packages/ingest/src/__fixtures__/rose-leghe-fantacalcio.xlsx
 
       - name: Catena dell'estensione in Chromium
         # Carica l'estensione vera in un browser vero contro un portale che

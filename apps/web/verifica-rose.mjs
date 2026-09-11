@@ -61,7 +61,16 @@ page.on('response', (r) => { if (r.status() >= 500) problemi.push(`${r.status()}
 // Accesso
 const prima = await ultimoLinkDalLog();
 await page.goto(`${base}/accedi`, { waitUntil: 'domcontentloaded' });
-await page.fill('input[name="email"]', 'rose@example.com');
+/**
+ * Un indirizzo diverso a ogni esecuzione.
+ *
+ * C'e' un limite di frequenza per email sulla richiesta del magic link — ed e'
+ * giusto che ci sia. Con un indirizzo fisso la SECONDA esecuzione non riceve
+ * nessuna mail e la verifica muore su «nessun magic link nel log», che sembra
+ * un guasto dell'accesso e invece e' la protezione che funziona.
+ */
+const emailDiProva = `rose-${Date.now().toString(36)}@example.com`;
+await page.fill('input[name="email"]', emailDiProva);
 await page.click('button:has-text("Mandami il link")');
 await page.locator('.notice').waitFor({ state: 'visible', timeout: 20000 });
 let href = null;
@@ -143,6 +152,66 @@ const rosaDopo = await store.getRoster(idLega);
 ok('ricaricare lo stesso file sostituisce invece di accumulare',
    rosaDopo !== null && rosaDopo.teams.length === (rosa?.teams.length ?? -1),
    `${rosaDopo?.teams.length} squadre`);
+
+/**
+ * 6. IL PRIMO NUMERO.
+ *
+ * E' il momento che il prodotto promette: si carica un file e da quel momento
+ * esce un giornale. Nessuna giornata giocata, nessun voto, nessun calendario —
+ * solo l'asta. Si guida il browser come lo guiderebbe l'admin, e si legge il
+ * giornale all'indirizzo pubblico, quello che finira' nel gruppo.
+ */
+await page.goto(`${base}/lega/${idLega}`, { waitUntil: 'domcontentloaded' });
+const bottoneVigilia = page.locator('button:has-text("numero di vigilia")');
+ok('la lega offre di far uscire la vigilia', await bottoneVigilia.count() === 1);
+await bottoneVigilia.click();
+await page.locator('h2:has-text("Edizioni")').waitFor({ state: 'visible', timeout: 120000 });
+
+const voceVigilia = page.locator('li.item:has-text("Vigilia della giornata 1")');
+await voceVigilia.waitFor({ state: 'visible', timeout: 30000 }).catch(() => {});
+ok('la vigilia compare in archivio, distinta dal retrospettivo',
+   await voceVigilia.count() === 1);
+
+const edizioni = await store.listEditions(idLega);
+ok("lo store ha un'edizione di tipo anteprima",
+   edizioni.some((e) => e.kind === 'anteprima' && e.matchday === 1),
+   JSON.stringify(edizioni));
+ok('e NON ha creato un retrospettivo di quella giornata',
+   !edizioni.some((e) => e.kind === 'giornale'),
+   JSON.stringify(edizioni));
+
+const salvata = await store.getEdition(idLega, 1, 'anteprima');
+ok('il numero ha almeno cinque pezzi',
+   (salvata?.edition.articles.length ?? 0) >= 5,
+   `${salvata?.edition.articles.length} pezzi`);
+ok("la testata dice che e' una vigilia",
+   /Vigilia/.test(salvata?.edition.masthead.tagline ?? ''),
+   salvata?.edition.masthead.tagline);
+
+/**
+ * L'indirizzo lo si prende DALLA PAGINA, non dallo store: cosi' si verifica
+ * anche che l'archivio linki il numero giusto. Un archivio che manda il
+ * retrospettivo all'indirizzo della vigilia e' un difetto invisibile allo
+ * store.
+ */
+const linkVigilia = await voceVigilia.locator('a:has-text("Leggi")').getAttribute('href');
+ok("l'archivio linka l'indirizzo della vigilia",
+   typeof linkVigilia === 'string' && /^\/g\/[^/]+\/1\/vigilia$/.test(linkVigilia),
+   String(linkVigilia));
+
+const pubblico = await ctx.request.get(`${base}${linkVigilia}`);
+ok("il numero di vigilia risponde all'indirizzo pubblico", pubblico.status() === 200,
+   String(pubblico.status()));
+const htmlVigilia = await pubblico.text();
+ok("la pagina e' il giornale, non un guscio", htmlVigilia.length > 4000,
+   `${htmlVigilia.length} byte`);
+
+// L'indirizzo del retrospettivo, per la stessa giornata, non esiste ancora:
+// e' la prova che i due numeri sono due risorse e non una sovrascritta.
+const indirizzoRetro = linkVigilia.replace(/\/vigilia$/, '');
+const retro = await ctx.request.get(`${base}${indirizzoRetro}`);
+ok("l'indirizzo del retrospettivo resta un 404 finche' non si gioca",
+   retro.status() === 404, String(retro.status()));
 
 console.log(esiti.join('\n'));
 await browser.close();

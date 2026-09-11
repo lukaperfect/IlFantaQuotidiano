@@ -52,11 +52,24 @@ create index if not exists leagues_owner_idx on leagues (owner_id);
 create table if not exists editions (
   league_id  text not null,
   matchday   integer not null,
+  -- 'giornale' (la mattina dopo l'ultima partita) o 'anteprima' (la mattina in
+  -- cui si comincia a giocare). Le due uscite della settimana parlano della
+  -- STESSA giornata, quindi il tipo fa parte della chiave: senza, la seconda
+  -- sovrascriverebbe la prima e il cliente perderebbe un numero su due.
+  kind       text not null default 'giornale',
   edition    jsonb not null,
   -- Il pack viaggia con l'edizione: senza, il giornale non e' ricostruibile.
   pack       jsonb not null,
-  primary key (league_id, matchday)
+  primary key (league_id, matchday, kind)
 );
+
+-- Per i database creati prima che l'anteprima esistesse. Le due istruzioni
+-- sono idempotenti, e su un database nuovo ridichiarano la stessa chiave che
+-- il create ha appena messo: costa una riscrittura dell'indice all'avvio e non
+-- lascia due percorsi di schema che possono divergere.
+alter table editions add column if not exists kind text not null default 'giornale';
+alter table editions drop constraint if exists editions_pkey;
+alter table editions add primary key (league_id, matchday, kind);
 
 -- Quando un umano ha approvato un'edizione sotto soglia. Aggiunta dopo,
 -- quindi come ALTER: uno schema che si applica solo ai database nuovi non e'

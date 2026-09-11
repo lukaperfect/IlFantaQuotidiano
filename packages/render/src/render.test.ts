@@ -58,7 +58,7 @@ describe('blocchi IR', () => {
     { meta: {}, masthead: {}, articles: [], personalCards: [] } as unknown as Edition,
     {
       leagueId: 'l', leagueName: 'L', matchday: 12, season: '2025-26', factEngineVersion: '1.0.0',
-      results: [], standings: [],
+      kind: 'giornale', results: [], fixtures: [], standings: [],
       facts: [{
         id: 'f1', type: 'BEFFA_DECIMALE', matchday: 12, drama: 80, polarity: 'tragedia',
         rarityPercentile: null, subjects: [{ kind: 'team', id: 't1', display: 'T1' }],
@@ -188,5 +188,103 @@ describe('card social', () => {
     const { edition } = await build();
     expect(cardsOf(edition)).toHaveLength(edition.personalCards.length);
     expect(cardsOf(edition)).toHaveLength(8);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * Il numero di vigilia
+ * ------------------------------------------------------------------ */
+
+describe('la pagina di un\'anteprima', () => {
+  /** Un'edizione di vigilia minima: nessun risultato, nessuna classifica. */
+  const vigilia = (over: {
+    fixtures?: { homeTeam: string; awayTeam: string }[];
+    standings?: { position: string; teamName: string; points: string }[];
+  } = {}) => {
+    const pack = {
+      leagueId: 'l', leagueName: 'Lega', matchday: 7, season: '2025-26',
+      factEngineVersion: 'anteprima-1.0.0', kind: 'anteprima',
+      facts: [{
+        id: 'f1', type: 'RE_DELL_ASTA', matchday: 7, drama: 80, polarity: 'trionfo',
+        rarityPercentile: null,
+        subjects: [{ kind: 'team', id: 't1', display: 'Alfa' }],
+        numbers: { prezzo: '460' }, plain: 'Ha pagato 460.', evidence: [],
+      }],
+      results: [],
+      fixtures: over.fixtures ?? [],
+      standings: over.standings ?? [],
+    } as unknown as FactPack;
+    const edition = {
+      meta: {
+        leagueId: 'l', leagueName: 'Lega', season: '2025-26', matchday: 7,
+        kind: 'anteprima', publishedAt: '2026-01-06T08:00:00+01:00',
+        factEngineVersion: 'anteprima-1.0.0', promptVersion: '1.0.0', rulesetVersion: 1,
+        models: { template: 'template' }, selectorSeed: 's', confidence: 1, degraded: false,
+      },
+      masthead: { title: 'FantaComics', tagline: 'Lega · Vigilia della giornata 7' },
+      articles: [{
+        slot: 'apertura', format: 'presentazione_sfida', persona: 'analista',
+        blocks: [{ kind: 'headline', text: 'Si comincia' }], factIds: ['f1'],
+      }],
+      personalCards: [],
+    } as unknown as Edition;
+    return { edition, pack };
+  };
+
+  it('il titolo del documento dice quale dei due numeri e\'', () => {
+    /**
+     * La testata diceva «Vigilia della giornata 7» e il titolo della finestra
+     * «Giornata 7». Con due uscite a settimana sulla stessa giornata, un
+     * lettore con due schede aperte non distingue quale ha in mano.
+     */
+    const { edition, pack } = vigilia();
+    const html = renderWebPage(edition, pack, { personaNames });
+    expect(html).toContain('<title>FantaComics · Lega · Vigilia della giornata 7</title>');
+    expect(html).toContain('og:title" content="FantaComics · Lega · Vigilia della giornata 7"');
+    expect(html).toContain('2025-26 · Vigilia della giornata 7');
+  });
+
+  it('non stampa intestazioni di tabelle vuote', () => {
+    /**
+     * `renderResults` e `renderStandings` producevano la tabella anche con zero
+     * righe: usciva un titolo «Risultati» con il vuoto sotto. Sul retrospettivo
+     * non capitava mai — un tabellino c'e' sempre — e sull'anteprima sempre.
+     */
+    const { edition, pack } = vigilia();
+    const html = renderWebPage(edition, pack, { personaNames });
+    expect(html).not.toContain('Risultati');
+    expect(html).not.toContain('Classifica');
+    expect(html).not.toContain('<div class="panel"></div>');
+  });
+
+  it('al posto del tabellino stampa le partite in programma', () => {
+    const { edition, pack } = vigilia({
+      fixtures: [{ homeTeam: 'Alfa', awayTeam: 'Beta' }],
+      standings: [{ position: '1°', teamName: 'Alfa', points: '9' }],
+    });
+    const html = renderWebPage(edition, pack, { personaNames });
+    expect(html).toContain('Si gioca');
+    expect(html).toContain('Alfa');
+    expect(html).toContain('Beta');
+    // Una classifica c'e' dalla seconda giornata, e allora si stampa.
+    expect(html).toContain('Classifica');
+    // Ma mai un punteggio: non si e' giocato.
+    expect(html).not.toContain('Risultati');
+  });
+
+  it('il retrospettivo continua a dire «Giornata», non «Vigilia»', async () => {
+    const { edition, pack } = await build();
+    const html = renderWebPage(edition, pack, { personaNames });
+    expect(html).toContain('· Giornata 12</title>');
+    expect(html).not.toContain('Vigilia');
+    // E il suo tabellino c'e': la correzione sulle tabelle vuote non lo tocca.
+    expect(html).toContain('Risultati');
+  });
+
+  it('anche la versione da stampa segue il tipo di numero', () => {
+    const { edition, pack } = vigilia({ fixtures: [{ homeTeam: 'Alfa', awayTeam: 'Beta' }] });
+    const html = renderPrintPage(edition, pack, { personaNames });
+    expect(html).toContain('Vigilia della giornata 7');
+    expect(html).toContain('Si gioca');
   });
 });

@@ -39,6 +39,24 @@ export type MemoryUpdate = {
   personaIds: string[];
   /** teamId -> polarità con cui è comparso in questa edizione. */
   appearances: Record<string, string[]>;
+  /**
+   * SE QUESTA EDIZIONE VALE COME «COMPARSA» AI FINI DELLA COPERTURA.
+   * Predefinito vero. Va messo a falso per la VIGILIA.
+   *
+   * La vigilia nomina tutti per costruzione: ha un fatto d'asta per ciascuna
+   * squadra proprio per garantire che nessuno manchi dal primo numero. Se
+   * quella menzione valesse come comparsa, il bonus di copertura del
+   * retrospettivo — che e' il numero che conta, quello con i risultati —
+   * risulterebbe azzerato per tutti a ogni giornata, e un presidente potrebbe
+   * restare fuori dal giornale vero per settimane mentre il sistema lo
+   * considera coperto. Il difetto sarebbe invisibile: nessun errore, solo un
+   * prodotto che smette lentamente di riguardare qualcuno.
+   *
+   * Il conteggio dei BERSAGLI invece si aggiorna comunque: essere sfottuti
+   * nella vigilia e' essere sfottuti, e le due uscite della settimana non
+   * devono poter colpire la stessa persona il doppio delle volte.
+   */
+  countsAsAppearance?: boolean;
 };
 
 /** Avanza la memoria di una giornata. Pura: nessuno stato nascosto. */
@@ -56,9 +74,12 @@ export function updateMemory(memory: EditorialMemory, update: MemoryUpdate): Edi
   for (const f of update.formatIds) next.lastFormatUse[f] = update.matchday;
   for (const p of update.personaIds) next.lastPersonaUse[p] = update.matchday;
 
+  const conta = update.countsAsAppearance ?? true;
   for (const [teamId, polarities] of Object.entries(update.appearances)) {
-    next.lastAppearance[teamId] = update.matchday;
-    if (polarities.some((p) => !NEGATIVE.has(p))) next.lastGlory[teamId] = update.matchday;
+    if (conta) {
+      next.lastAppearance[teamId] = update.matchday;
+      if (polarities.some((p) => !NEGATIVE.has(p))) next.lastGlory[teamId] = update.matchday;
+    }
 
     const negatives = polarities.filter((p) => NEGATIVE.has(p)).length;
     // Decadimento: il conteggio dei bersagli si sgonfia se non si viene colpiti.
