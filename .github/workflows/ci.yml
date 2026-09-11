@@ -67,7 +67,7 @@ jobs:
             const r = require('/tmp/store.json');
             const saltati = r.numPendingTests ?? 0;
             if (saltati > 0) { console.error('Test saltati: ' + saltati + ' — il database non era raggiungibile.'); process.exit(1); }
-            console.log('Nessun test saltato: contratto verificato su entrambe le implementazioni.');
+            console.log('Nessun test saltato: contratto verificato su tutte le implementazioni (memoria, file, Postgres).');
           "
 
 
