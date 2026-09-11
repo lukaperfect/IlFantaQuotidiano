@@ -293,17 +293,62 @@ rimette dentro dal modulo vero: se le due parti divergessero, lo direbbe subito.
 rischio: i diritti sulle immagini di Serie A bloccano la monetizzazione al primo
 tentativo.
 
+## Il foglio delle rose di leghe.fantacalcio.it
+
+Il primo formato vero che il prodotto legge, ed e' anche l'artefatto che apre
+la porta: un admin lo scarica gia' fatto dalla sua lega, e da quel singolo file
+escono squadre, rose complete, ruoli e prezzi d'asta. Non e' una delle tabelle
+di una giornata — e' cio' che fa *esistere* la lega, una volta per stagione.
+
+Il foglio e' disposto in orizzontale: ogni squadra occupa due colonne (nome del
+giocatore, costo) piu' una di stacco, con il nome in prima riga e una riga
+`totale` in fondo.
+
+**Due difetti strutturali del formato, ed e' li' che sta il lavoro.**
+
+*Il ruolo non e' scritto da nessuna parte: e' implicito nella posizione.* I
+primi tre sono portieri, gli otto dopo difensori, poi otto centrocampisti, poi
+sei attaccanti. Una riga aggiunta o tolta a meta' elenco fa scalare tutti i
+ruoli sottostanti, e il file resta perfettamente valido a vedersi — il guasto
+peggiore possibile: silenzioso, e capace di sbagliare ogni formazione, ogni XI
+ottimale e ogni fatto che ne discende. Per questo il numero di giocatori non si
+adatta a cio' che si trova, si **verifica**: se non e' 25 il file viene
+rifiutato, perche' dedurre i ruoli da un elenco di lunghezza sbagliata
+significa inventarli.
+
+*Non esiste un identificatore di giocatore: solo il nome visualizzato.* La
+piattaforma disambigua gli omonimi con le iniziali — «Thuram» e «Thuram K.»
+sono due persone diverse, come «Adams C.» e «Adams A.», «Esposito Se.» e
+«Esposito F.P.». La normalizzazione deve tenerli distinti; e siccome in
+un'asta un giocatore appartiene a una squadra sola, due chiavi uguali provano
+che qualcosa e' andato storto — una riga duplicata, o due nomi collassati sulla
+stessa chiave. Unirli in silenzio corromperebbe due rose, quindi si rifiuta.
+
+In compenso il formato regala un controllo d'integrita': la riga `totale`.
+Sommare i costi e confrontarli coglie esattamente cio' che il conteggio delle
+righe non vede — un costo corretto a mano. Le due verifiche non si
+sovrappongono, ed e' per questo che ci sono entrambe.
+
+**Il lettore non usa librerie.** Legge un file caricato da un estraneo, ed e'
+la superficie d'attacco piu' larga del prodotto: duecento righe che fanno solo
+quello si rileggono per intero, un albero di dipendenze transitive no. Cio' che
+deve reggere non e' il file che l'utente scarica ma quello che *ricarica*:
+passato da Excel o LibreOffice, le stringhe migrano da `inlineStr` a
+`sharedStrings`, le voci da memorizzate a compresse, i totali diventano formule
+con il valore in cache. Sono lo stesso foglio e devono dare lo stesso
+risultato: sei codifiche diverse sono sotto test, e un generatore le produce
+tutte.
+
+Misurato sul file di una lega vera: 10 squadre, 250 giocatori, 250 chiavi
+distinte, zero collisioni, e il `totale` che combacia su 10 blocchi su 10.
+
 ## Cosa manca
 
 Per andare in produzione servono, nell'ordine:
 
-1. **I nomi dei campi veri.** L'estensione esiste, è verificata in un browser
-   contro un portale di prova che scarica i propri dati come farebbe un sito
-   vero, e la catena regge tutta: intercettazione (`fetch` e `XMLHttpRequest`),
-   mappatura, relay autenticato, giornale pubblicato. Quello che manca è un
-   solo profilo di piattaforma — quali URL guardare e come si chiamano i campi
-   dentro — che è esattamente la parte progettata per essere un dato
-   aggiornabile lato server. Si compila osservando le risposte reali una volta.
+1. **I nomi dei campi veri per le GIORNATE.** Le rose ora si leggono dal file
+   che la piattaforma produce; quello che manca e' il profilo per voti e
+   formazioni.
 2. **Un provider di posta vero**: il `Mailer` è un'interfaccia con
    implementazioni su console e su file. Serve collegarci un servizio prima di
    far accedere qualcuno che non sia sulla stessa macchina.

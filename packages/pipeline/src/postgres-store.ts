@@ -2,7 +2,8 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import pg from 'pg';
-import type { Edition, FactPack, LeagueRuleset } from '@fantacomics/core';
+import type { Edition, FactPack, LeagueRoster, LeagueRuleset } from '@fantacomics/core';
+import { LeagueRosterSchema } from '@fantacomics/core';
 import type { Account, AuthStore, MagicLink } from '@fantacomics/auth';
 import { emptyMemory, type EditorialMemory } from '@fantacomics/editorial';
 import type { HistoricalMatchday, LeagueHistory, RarityCorpus } from '@fantacomics/facts';
@@ -146,6 +147,25 @@ export class PostgresLeagueStore implements LeagueStore {
       `update leagues set last_matchday = greatest(coalesce(last_matchday, 0), $2)
        where league_id = $1`,
       [leagueId, edition.meta.matchday],
+    );
+  }
+
+  async getRoster(leagueId: string): Promise<LeagueRoster | null> {
+    const { rows } = await this.pool.query(
+      'select roster from league_rosters where league_id = $1', [leagueId],
+    );
+    if (rows[0] === undefined) return null;
+    // Si valida anche qui: il file store lo fa, e un contratto condiviso che
+    // regge solo su una delle due implementazioni non e' un contratto.
+    const esito = LeagueRosterSchema.safeParse(rows[0].roster);
+    return esito.success ? esito.data : null;
+  }
+
+  async saveRoster(leagueId: string, roster: LeagueRoster): Promise<void> {
+    await this.pool.query(
+      `insert into league_rosters (league_id, roster) values ($1,$2)
+       on conflict (league_id) do update set roster = excluded.roster`,
+      [leagueId, JSON.stringify(LeagueRosterSchema.parse(roster))],
     );
   }
 

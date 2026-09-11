@@ -168,6 +168,12 @@ jobs:
       - name: Relay autenticato
         run: pnpm exec tsx apps/worker/src/scripts/verifica-relay.ts
 
+      - name: Rose dal foglio della piattaforma
+        # Senza argomento la verifica genera un foglio con la stessa forma di
+        # quello vero: il file di una lega reale non sta nel repository e non
+        # deve starci. Cio' che si verifica qui e' il percorso, non i dati.
+        run: pnpm exec tsx apps/web/verifica-rose.mjs
+
       - name: Catena dell'estensione in Chromium
         # Carica l'estensione vera in un browser vero contro un portale che
         # scarica i propri dati come farebbe un sito: intercettazione,

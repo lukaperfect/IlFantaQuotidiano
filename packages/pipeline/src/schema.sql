@@ -74,3 +74,12 @@ create table if not exists corpus_points (
   points  double precision not null
 );
 create index if not exists corpus_points_value_idx on corpus_points (points);
+
+-- Le rose durano una stagione, non una giornata: tabella separata dalle
+-- edizioni. Come `editions` e `league_state`, non referenzia `leagues` — per
+-- la stessa ragione, cioe' per non rendere le due implementazioni dello store
+-- diverse fra loro.
+create table if not exists league_rosters (
+  league_id  text primary key,
+  roster     jsonb not null
+);

@@ -2,7 +2,9 @@
 
 import { useActionState } from 'react';
 import { useFormStatus } from 'react-dom';
-import { creaLegaDaFile, creaLegaDiProva, type EsitoCreazione } from '@/app/actions';
+import {
+  creaLegaDaFile, creaLegaDaRose, creaLegaDiProva, type EsitoCreazione,
+} from '@/app/actions';
 
 /**
  * Un pulsante che dice di stare lavorando.
@@ -26,6 +28,44 @@ function Esito({ esito }: { esito: EsitoCreazione | null }) {
   // Il messaggio arriva dall'importatore ed e' specifico: quale file, quale
   // riga, cosa manca. E' l'unica informazione che rende l'errore risolvibile.
   return <p className="notice error" role="status">{esito.messaggio}</p>;
+}
+
+/**
+ * Il caricamento delle rose dal file della piattaforma.
+ *
+ * Sta PRIMA dei CSV nella pagina perche' per chi ha una lega vera e' il
+ * percorso piu' corto: il file esiste gia', non va costruito.
+ */
+export function FormRose() {
+  const [esito, azione] = useActionState<EsitoCreazione | null, FormData>(creaLegaDaRose, null);
+  return (
+    <form action={azione} data-modulo="rose-xlsx">
+      <Esito esito={esito} />
+      <label>
+        Nome della lega
+        <input name="leagueName" maxLength={60} required placeholder="La mia lega" />
+      </label>
+      <div className="row">
+        <label style={{ flex: 1 }}>
+          Stagione
+          <input name="season" defaultValue="2025-26" pattern="[0-9]{4}-[0-9]{2}" required />
+        </label>
+        <label style={{ flex: 1 }}>
+          Piccante
+          <select name="spice" defaultValue="2">
+            <option value="1">Bonario</option>
+            <option value="2">Pungente</option>
+            <option value="3">Feroce</option>
+          </select>
+        </label>
+      </div>
+      <label>
+        Foglio delle rose (.xlsx)
+        <input name="roseXlsx" type="file" accept=".xlsx" required />
+      </label>
+      <Invia testo="Carica le rose" attesa="Leggo il file…" />
+    </form>
+  );
 }
 
 export function FormProva() {

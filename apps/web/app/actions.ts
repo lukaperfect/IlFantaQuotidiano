@@ -12,6 +12,7 @@ import { authStore } from '@/lib/store';
 import { requireAccount, startSession, NONCE_COOKIE } from '@/lib/session';
 import {
   importFromFiles, generateWorld, withOfficialScores, nudgeTeamToScore, AdapterError,
+  importaRoseXlsx,
 } from '@fantacomics/ingest';
 import { runMatchdayPipeline } from '@fantacomics/pipeline';
 import { TemplateDriver, AnthropicDriver } from '@fantacomics/llm';
@@ -126,6 +127,21 @@ async function fileText(form: FormData, field: string): Promise<string> {
   return typeof value === 'string' ? value : '';
 }
 
+/** Un .xlsx di rose sta in poche decine di KB: oltre questo non e' quel file. */
+const MAX_BYTE_ROSE = 4 * 1024 * 1024;
+
+async function fileBytes(form: FormData, field: string): Promise<Buffer | null> {
+  const value = form.get(field);
+  if (!(value instanceof File) || value.size === 0) return null;
+  if (value.size > MAX_BYTE_ROSE) {
+    throw new AdapterError(
+      `Il file pesa ${Math.round(value.size / 1024)} KB: troppo per essere un foglio di rose.`,
+      'parse', false,
+    );
+  }
+  return Buffer.from(await value.arrayBuffer());
+}
+
 export type EsitoCreazione = { ok: boolean; messaggio: string };
 
 /**
@@ -155,6 +171,57 @@ async function conEsito(lavoro: () => Promise<string>): Promise<EsitoCreazione |
   // Fuori dal try: `redirect` funziona lanciando, e catturarlo qui lo
   // trasformerebbe in un errore da mostrare all'utente.
   redirect(destinazione);
+}
+
+/**
+ * Crea una lega dal foglio delle rose che la piattaforma gia' produce.
+ *
+ * E' l'onboarding piu' corto che esista per chi ha una lega vera: un file
+ * scaricato, nessuna colonna da preparare, e dall'altra parte esce la lega
+ * completa — squadre, rose, ruoli e prezzi d'asta. Il percorso dai CSV resta
+ * accanto: serve per le GIORNATE, che questo file non contiene.
+ */
+export async function creaLegaDaRose(
+  _precedente: EsitoCreazione | null,
+  form: FormData,
+): Promise<EsitoCreazione> {
+  return conEsito(async () => {
+    const account = await requireAccount();
+    const leagueName = safeName(String(form.get('leagueName') ?? ''), 60);
+    const season = String(form.get('season') ?? '2025-26');
+    const spice = Number(form.get('spice') ?? 2) as 1 | 2 | 3;
+
+    const bytes = await fileBytes(form, 'roseXlsx');
+    if (!bytes) throw new AdapterError('Serve il file delle rose (.xlsx).', 'parse', false);
+
+    const esito = importaRoseXlsx(bytes);
+
+    const leagueId = `lega-${stableHash(`${account.accountId}:${leagueName}:${season}`)}`;
+    const esistente = await store.getConfigForOwner(leagueId, account.accountId);
+    await store.saveConfig({
+      leagueId,
+      ownerId: account.accountId,
+      publicSlug: esistente?.publicSlug ?? randomToken(18),
+      relaySecret: esistente?.relaySecret ?? null,
+      leagueName, ruleset: esistente?.ruleset ?? DEFAULT_RULESET, spice,
+      createdAt: esistente?.createdAt ?? new Date().toISOString(),
+      lastMatchday: esistente?.lastMatchday ?? null,
+    });
+
+    await store.saveRoster(leagueId, {
+      season,
+      importedAt: new Date().toISOString(),
+      source: 'xlsx-rose',
+      teams: esito.squadre.map((s) => ({
+        teamId: s.teamId,
+        teamName: s.teamName,
+        players: s.giocatori,
+      })),
+    });
+
+    revalidatePath('/');
+    return `/lega/${leagueId}`;
+  });
 }
 
 /** Crea una lega dai CSV esportati dalla piattaforma. */

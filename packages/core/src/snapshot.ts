@@ -159,3 +159,39 @@ export const LeagueWeekSnapshotSchema = z.object({
   standingsBefore: z.array(StandingRowSchema).default([]),
 });
 export type LeagueWeekSnapshot = z.infer<typeof LeagueWeekSnapshotSchema>;
+
+/**
+ * LE ROSE DELLA LEGA.
+ *
+ * Vive fuori dalla giornata perche' ha un ciclo di vita diverso: uno snapshot
+ * settimanale racconta un turno, le rose durano una stagione. Un admin le
+ * carica una volta — dal file che la sua piattaforma gia' produce — e da li'
+ * in poi la lega esiste: squadre, ruoli, e il prezzo pagato all'asta.
+ *
+ * Il prezzo non e' un ornamento: e' la misura dell'ASPETTATIVA, e senza di
+ * essa meta' della satira non esiste. Un attaccante da 460 crediti che fa tre
+ * punti e' una notizia; lo stesso punteggio da uno pagato 1 non lo e'.
+ */
+export const RosterPlayerSchema = z.object({
+  playerId: z.string().min(1),
+  playerName: z.string().min(1),
+  role: RoleSchema,
+  purchasePrice: z.number().min(0),
+});
+export type RosterPlayer = z.infer<typeof RosterPlayerSchema>;
+
+export const RosterTeamSchema = z.object({
+  teamId: z.string().min(1),
+  teamName: z.string().min(1),
+  players: z.array(RosterPlayerSchema).min(1),
+});
+export type RosterTeam = z.infer<typeof RosterTeamSchema>;
+
+export const LeagueRosterSchema = z.object({
+  season: z.string().regex(/^\d{4}-\d{2}$/),
+  importedAt: z.string().datetime({ offset: true }),
+  /** Da dove sono arrivate: serve a sapere cosa ricontrollare quando non tornano. */
+  source: z.enum(['xlsx-rose', 'csv', 'extension', 'synthetic']),
+  teams: z.array(RosterTeamSchema).min(2),
+});
+export type LeagueRoster = z.infer<typeof LeagueRosterSchema>;

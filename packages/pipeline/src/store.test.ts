@@ -43,9 +43,18 @@ const implementazioni: { nome: string; salta: boolean; crea: () => Promise<Ambie
       const pool = new pg.Pool({ connectionString: DB });
       await migrate(pool);
       // Ogni test parte da zero: gli identificatori si ripetono fra i casi.
-      await pool.query(
-        'truncate leagues, editions, league_state, corpus_points, accounts, magic_links, issue_throttle cascade',
+      //
+      // Le tabelle si CHIEDONO al catalogo invece di elencarle. Un elenco
+      // scritto a mano invecchia alla prima tabella nuova, e il guasto che
+      // produce e' pessimo: non un errore, ma dati di un test che
+      // ricompaiono in un altro — cioe' una suite che fallisce o passa a
+      // seconda dell'ordine. E' successo davvero aggiungendo `league_rosters`.
+      const { rows } = await pool.query<{ tablename: string }>(
+        "select tablename from pg_tables where schemaname = 'public'",
       );
+      if (rows.length > 0) {
+        await pool.query(`truncate ${rows.map((r) => `"${r.tablename}"`).join(', ')} cascade`);
+      }
       return {
         league: new PostgresLeagueStore(pool),
         auth: new PostgresAuthStore(pool),
@@ -79,6 +88,28 @@ const lega = (over: Record<string, unknown> = {}) => ({
   createdAt: '2026-01-01T00:00:00.000Z', lastMatchday: null, ...over,
 });
 
+const rosa = (over: Record<string, unknown> = {}) => ({
+  season: '2025-26',
+  importedAt: '2026-01-01T00:00:00.000Z',
+  source: 'xlsx-rose' as const,
+  teams: [
+    {
+      teamId: 'asd-uno', teamName: 'ASD Uno',
+      players: [
+        { playerId: 'vicario', playerName: 'Vicario', role: 'P' as const, purchasePrice: 94 },
+        { playerId: 'bremer', playerName: 'Bremer', role: 'D' as const, purchasePrice: 86 },
+      ],
+    },
+    {
+      teamId: 'asd-due', teamName: 'ASD Due',
+      players: [
+        { playerId: 'maignan', playerName: 'Maignan', role: 'P' as const, purchasePrice: 86 },
+      ],
+    },
+  ],
+  ...over,
+});
+
 for (const impl of implementazioni) {
   describe.skipIf(impl.salta)(`contratto dello store — ${impl.nome}`, () => {
     let env: Ambiente;
@@ -92,6 +123,51 @@ for (const impl of implementazioni) {
       expect(letto?.spice).toBe(2);
       expect(letto?.ruleset.goalThreshold.base).toBe(66);
       expect(await env.league.listLeagues('acc-mario')).toHaveLength(1);
+    });
+
+    it('rilegge le rose con ruoli e prezzi d\'asta', async () => {
+      expect(await env.league.getRoster('lega-1')).toBeNull();
+      await env.league.saveRoster('lega-1', rosa());
+      const letta = await env.league.getRoster('lega-1');
+      expect(letta?.teams).toHaveLength(2);
+      expect(letta?.source).toBe('xlsx-rose');
+      expect(letta?.teams[0]?.players[0]).toEqual({
+        playerId: 'vicario', playerName: 'Vicario', role: 'P', purchasePrice: 94,
+      });
+      // Il prezzo e' un numero anche dopo il giro su disco o su jsonb: se
+      // tornasse stringa, ogni confronto sull'asta sarebbe silenziosamente
+      // lessicografico.
+      expect(typeof letta?.teams[0]?.players[0]?.purchasePrice).toBe('number');
+    });
+
+    it('ricaricare le rose sostituisce, non accumula', async () => {
+      await env.league.saveRoster('lega-1', rosa());
+      await env.league.saveRoster('lega-1', rosa({
+        importedAt: '2026-02-01T00:00:00.000Z',
+        teams: [
+          { teamId: 'solo-una', teamName: 'Solo Una', players: [
+            { playerId: 'x', playerName: 'X', role: 'A' as const, purchasePrice: 1 },
+          ] },
+          { teamId: 'solo-due', teamName: 'Solo Due', players: [
+            { playerId: 'y', playerName: 'Y', role: 'A' as const, purchasePrice: 2 },
+          ] },
+        ],
+      }));
+      const letta = await env.league.getRoster('lega-1');
+      expect(letta?.teams.map((t) => t.teamId)).toEqual(['solo-una', 'solo-due']);
+      expect(letta?.importedAt).toBe('2026-02-01T00:00:00.000Z');
+    });
+
+    it('le rose non trapassano da una lega all\'altra', async () => {
+      await env.league.saveRoster('lega-1', rosa());
+      expect(await env.league.getRoster('lega-2')).toBeNull();
+    });
+
+    it('rifiuta di salvare rose che non stanno in piedi', async () => {
+      await expect(env.league.saveRoster('lega-1', rosa({ teams: [] }))).rejects.toThrow();
+      await expect(env.league.saveRoster('lega-1', rosa({ season: 'boh' }))).rejects.toThrow();
+      // E dopo un rifiuto non deve essere rimasto niente a meta'.
+      expect(await env.league.getRoster('lega-1')).toBeNull();
     });
 
     it('isola i proprietari', async () => {

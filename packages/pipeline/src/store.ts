@@ -1,6 +1,7 @@
 import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import type { Edition, FactPack, LeagueRuleset } from '@fantacomics/core';
+import type { Edition, FactPack, LeagueRoster, LeagueRuleset } from '@fantacomics/core';
+import { LeagueRosterSchema } from '@fantacomics/core';
 import type { HistoricalMatchday, LeagueHistory, RarityCorpus } from '@fantacomics/facts';
 import { emptyMemory, type EditorialMemory } from '@fantacomics/editorial';
 
@@ -125,6 +126,16 @@ export interface LeagueStore {
    * un'approvazione che non trova l'edizione non deve poter dire di si'.
    */
   approveEdition(leagueId: string, matchday: number, at: string): Promise<boolean>;
+  /**
+   * Le rose della lega: durano una stagione, non una giornata.
+   *
+   * Stanno qui e non nello snapshot settimanale perche' hanno un ciclo di vita
+   * diverso: l'admin le carica una volta e poi ogni giornata le usa. Tenerle
+   * dentro lo snapshot obbligherebbe a ricaricarle ogni settimana, che e'
+   * esattamente l'attrito che fa smettere.
+   */
+  getRoster(leagueId: string): Promise<LeagueRoster | null>;
+  saveRoster(leagueId: string, roster: LeagueRoster): Promise<void>;
   /** Distribuzione cross-lega: il vantaggio competitivo che cresce con gli utenti. */
   getCorpus(): Promise<RarityCorpus | null>;
   addToCorpus(points: readonly number[]): Promise<void>;
@@ -316,6 +327,21 @@ export class FileLeagueStore implements LeagueStore {
     }
   }
 
+  async getRoster(leagueId: string): Promise<LeagueRoster | null> {
+    if (!SEGMENTO_VALIDO.test(leagueId)) return null;
+    const grezzo = await this.readJson<unknown>(this.path('rose', `${leagueId}.json`), null);
+    if (grezzo === null) return null;
+    // Un file su disco puo' essere stato scritto da una versione precedente o
+    // corrotto a meta' scrittura: si valida in lettura, e una rosa illeggibile
+    // e' una rosa assente invece di un guasto piu' a valle.
+    const esito = LeagueRosterSchema.safeParse(grezzo);
+    return esito.success ? esito.data : null;
+  }
+
+  async saveRoster(leagueId: string, roster: LeagueRoster): Promise<void> {
+    await this.writeJson(this.path('rose', `${leagueId}.json`), LeagueRosterSchema.parse(roster));
+  }
+
   async getCorpus(): Promise<RarityCorpus | null> {
     const points = await this.readJson<number[]>(this.path('corpus.json'), []);
     return points.length === 0 ? null : { sortedTeamPoints: points };
@@ -333,6 +359,7 @@ export class InMemoryLeagueStore implements LeagueStore {
   private readonly states = new Map<string, LeagueState>();
   private readonly editions = new Map<string, PublishedEdition>();
   private readonly configs = new Map<string, LeagueConfig>();
+  private readonly rose = new Map<string, LeagueRoster>();
   private corpus: number[] = [];
 
   async listLeagues(ownerId: string): Promise<LeagueConfig[]> {
@@ -364,6 +391,13 @@ export class InMemoryLeagueStore implements LeagueStore {
     let s = this.states.get(leagueId);
     if (!s) { s = { memory: emptyMemory(), history: [] }; this.states.set(leagueId, s); }
     return s;
+  }
+
+  async getRoster(leagueId: string): Promise<LeagueRoster | null> {
+    return this.rose.get(leagueId) ?? null;
+  }
+  async saveRoster(leagueId: string, roster: LeagueRoster): Promise<void> {
+    this.rose.set(leagueId, LeagueRosterSchema.parse(roster));
   }
 
   async getMemory(leagueId: string): Promise<EditorialMemory> { return this.state(leagueId).memory; }

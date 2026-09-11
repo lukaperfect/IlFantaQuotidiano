@@ -9,3 +9,5 @@ export * from './collectors/extension-relay.js';
 export * from './collectors/relay-import.js';
 export * from './profiles.js';
 export * from './synthetic-portal.js';
+export * from './xlsx.js';
+export * from './collectors/rose-xlsx.js';
