@@ -35,6 +35,14 @@ export async function GET(
     headers: {
       'content-type': 'text/html; charset=utf-8',
       /**
+       * Fuori dai motori di ricerca.
+       *
+       * Sta nell'header e non solo nel `<meta>` perche' le immagini e i PDF
+       * non hanno un head in cui metterlo, e perche' l'header vale anche per
+       * chi scarica il file senza renderizzarlo.
+       */
+      'x-robots-tag': 'noindex, nofollow, noarchive',
+      /**
        * Come le due sorelle, e per la stessa ragione: l'indirizzo e' un
        * segreto revocabile, e una risposta che resta in cache fa sopravvivere
        * il vecchio link alla revoca. Questa route era l'unica delle tre a non

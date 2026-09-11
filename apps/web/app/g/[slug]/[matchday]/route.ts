@@ -46,6 +46,14 @@ export async function GET(
     headers: {
       'content-type': 'text/html; charset=utf-8',
       /**
+       * Fuori dai motori di ricerca.
+       *
+       * Sta nell'header e non solo nel `<meta>` perche' le immagini e i PDF
+       * non hanno un head in cui metterlo, e perche' l'header vale anche per
+       * chi scarica il file senza renderizzarlo.
+       */
+      'x-robots-tag': 'noindex, nofollow, noarchive',
+      /**
        * Nessuna cache condivisa.
        *
        * L'indirizzo e' un segreto revocabile: se la risposta resta in una

@@ -220,6 +220,21 @@ che passa dall'id interno e dalla sessione, e decide: approvarla registra un
 giudizio umano senza toccare il testo, e rigenerare la giornata azzera
 l'approvazione, perché quel «va bene» riguardava quel giornale lì.
 
+**Un motore di ricerca ha una memoria più lunga di una cache.** La promessa
+«l'indirizzo è un segreto revocabile» l'ho già dovuta difendere una volta dalle
+cache HTTP; i motori sono la stessa minaccia, peggiore. Basta che qualcuno
+incolli il link in un forum perché nomi, punteggi e sfottò diventino cercabili
+per sempre — e rigenerare lo slug a quel punto non revoca più niente, perché il
+contenuto è già altrove. La mossa istintiva, `Disallow: /g/` nel `robots.txt`,
+è **quella sbagliata**: `Disallow` impedisce di *scaricare* la pagina, non di
+indicizzarla, e un motore che trova il link altrove può elencare l'URL lo
+stesso — senza aver mai letto il `noindex` che gli stiamo chiedendo di
+rispettare. La combinazione che funziona è l'opposto: `/g/` resta scaricabile, e
+ogni risposta porta `X-Robots-Tag: noindex` (più il `<meta>` nel documento). I
+tag OpenGraph restano: l'anteprima in chat e l'indicizzazione sono due cose
+diverse, e rinunciare alla prima per ottenere la seconda spegnerebbe proprio la
+feature che moltiplica la condivisione.
+
 **Il giornale è pubblico, il link è revocabile.** La lettura senza account non è
 una svista: è il ciclo di condivisione che regge il prodotto. Ma l'indirizzo è
 uno slug lungo e casuale, separato dall'identità della lega e rigenerabile in un

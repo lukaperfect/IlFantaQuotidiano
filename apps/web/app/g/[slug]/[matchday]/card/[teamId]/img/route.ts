@@ -56,6 +56,12 @@ export async function GET(
     headers: {
       'content-type': 'image/svg+xml; charset=utf-8',
       /**
+       * Fuori dai motori di ricerca: un'immagine indicizzata e' contenuto
+       * della lega che sopravvive alla revoca dello slug, e qui non c'e'
+       * nemmeno un `<meta>` in cui dirlo.
+       */
+      'x-robots-tag': 'noindex, nofollow, noarchive',
+      /**
        * Nessuna cache condivisa.
        *
        * L'indirizzo e' un segreto revocabile: se la risposta resta in una

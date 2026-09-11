@@ -14,12 +14,15 @@ type Props = { params: Promise<{ slug: string; matchday: string; teamId: string 
  * Quando la card finisce nel gruppo, chi non apre deve comunque leggere lo
  * sfottò: e' quello che genera il click, non il titolo della pagina.
  */
+/** L'indirizzo e' un segreto revocabile: un motore che lo indicizza lo rende eterno. */
+const SENZA_INDICE = { index: false, follow: false, nocache: true } as const;
+
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug, matchday, teamId } = await params;
   const config = await store.getConfigBySlug(slug);
   const published = config ? await store.getEdition(config.leagueId, Number(matchday)) : null;
   const card = published?.edition.personalCards.find((c) => c.teamId === teamId);
-  if (!card) return { title: 'FantaComics' };
+  if (!card) return { title: 'FantaComics', robots: SENZA_INDICE };
 
   const img = `/g/${slug}/${matchday}/card/${teamId}/img?formato=og`;
   return {
@@ -31,6 +34,15 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       images: [{ url: img, width: 1200, height: 630 }],
     },
     twitter: { card: 'summary_large_image', images: [img] },
+    /**
+     * L'anteprima nel gruppo si', l'indicizzazione no.
+     *
+     * Sono due cose diverse e vanno tenute separate: i tag OpenGraph servono
+     * a chi riceve il link in chat, il `noindex` a chi il link non dovrebbe
+     * averlo mai visto. Rinunciare ai primi per ottenere il secondo
+     * spegnerebbe proprio la feature che moltiplica la condivisione.
+     */
+    robots: SENZA_INDICE,
   };
 }
 

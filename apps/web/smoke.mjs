@@ -139,6 +139,38 @@ await lettore.page.locator('article.art').first().waitFor({ state: 'visible', ti
 const pezzi = await lettore.page.locator('article.art').count();
 ok('giornale leggibile senza account', pezzi > 0, `${pezzi} pezzi`);
 
+/**
+ * E il giornale non deve finire nei motori di ricerca.
+ *
+ * L'indirizzo e' un segreto revocabile: quella promessa l'ho gia' dovuta
+ * difendere dalle cache HTTP, e i motori sono la stessa minaccia con una
+ * memoria molto piu' lunga. Basta che qualcuno incolli il link in un forum
+ * perche' nomi, punteggi e sfottio' diventino cercabili per sempre — e
+ * rigenerare lo slug a quel punto non revoca piu' niente.
+ */
+const slugPubblico = linkPubblico.split('/g/')[1].split('/')[0];
+for (const [nome, percorso] of [
+  ['giornale', `/g/${slugPubblico}/3`],
+  ['versione da stampa', `/g/${slugPubblico}/3/stampa`],
+]) {
+  const r = await lettore.page.request.get(`${base}${percorso}`);
+  ok(`${nome}: header noindex`,
+     (r.headers()['x-robots-tag'] ?? '').includes('noindex'),
+     r.headers()['x-robots-tag'] ?? '(assente)');
+}
+ok('il documento del giornale porta anche il meta robots',
+   (await (await lettore.page.request.get(`${base}/g/${slugPubblico}/3`)).text())
+     .includes('name="robots" content="noindex'));
+
+const robots = await lettore.page.request.get(`${base}/robots.txt`);
+const testoRobots = await robots.text();
+ok('robots.txt esiste', robots.status() === 200, `status ${robots.status()}`);
+// Il punto sottile: `/g/` NON va vietato, altrimenti il motore non scarica la
+// pagina e non legge mai il noindex che gli stiamo chiedendo di rispettare.
+ok('robots.txt non vieta /g/, cosi’ il noindex viene letto',
+   !/Disallow:\s*\/g\//.test(testoRobots), testoRobots.replace(/\n/g, ' | ').slice(0, 90));
+ok('robots.txt vieta l’API', /Disallow:[^\n]*\/api\//.test(testoRobots));
+
 // 5. Un altro account non vede la lega di Mario
 const giulia = await nuovaSessione();
 await accedi(giulia.page, 'giulia@example.com');

@@ -54,6 +54,17 @@ export function renderPage(edition: Edition, pack: FactPack, opts: PageOptions =
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     `<title>${esc(title)}</title>`,
     `<meta name="description" content="${esc(edition.masthead.tagline)}">`,
+    /**
+     * Fuori dai motori di ricerca.
+     *
+     * L'indirizzo del giornale e' un segreto revocabile, e quella promessa
+     * l'ho gia' dovuta difendere una volta dalle cache HTTP. I motori sono la
+     * stessa minaccia con una memoria molto piu' lunga: basta che qualcuno
+     * incolli il link in un forum perche' nomi, punteggi e sfottio' della lega
+     * diventino cercabili per sempre — e rigenerare lo slug a quel punto non
+     * revoca piu' niente, perche' il contenuto e' gia' altrove.
+     */
+    '<meta name="robots" content="noindex, nofollow, noarchive">',
     `<meta property="og:title" content="${esc(title)}">`,
     `<meta property="og:description" content="${esc(edition.masthead.tagline)}">`,
     '<style>',
