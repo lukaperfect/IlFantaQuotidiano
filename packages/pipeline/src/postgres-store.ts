@@ -7,6 +7,7 @@ import { LeagueRosterSchema } from '@fantacomics/core';
 import type { Account, AuthStore, MagicLink } from '@fantacomics/auth';
 import { emptyMemory, type EditorialMemory } from '@fantacomics/editorial';
 import type { HistoricalMatchday, LeagueHistory, RarityCorpus } from '@fantacomics/facts';
+import type { Observation } from '@fantacomics/ingest';
 import type { LeagueConfig, LeagueStore, PublishedEdition } from './store.js';
 
 /**
@@ -48,12 +49,22 @@ export class PostgresLeagueStore implements LeagueStore {
       spice: Number(row.spice) as 1 | 2 | 3,
       createdAt: (row.created_at as Date).toISOString(),
       lastMatchday: row.last_matchday === null ? null : Number(row.last_matchday),
+      fonte: (row.fonte as LeagueConfig['fonte']) ?? null,
     };
   }
 
   async listLeagues(ownerId: string): Promise<LeagueConfig[]> {
     const { rows } = await this.pool.query(
       'select * from leagues where owner_id = $1 order by league_name', [ownerId],
+    );
+    return rows.map((r) => this.toConfig(r));
+  }
+
+  async legheDaConsegnare(): Promise<LeagueConfig[]> {
+    // Il filtro sta nella WHERE, non in memoria: una lega senza fonte non
+    // deve nemmeno uscire dal database per un compito che non la riguarda.
+    const { rows } = await this.pool.query(
+      "select * from leagues where fonte is not null and fonte->>'leagueExternalId' <> ''",
     );
     return rows.map((r) => this.toConfig(r));
   }
@@ -89,8 +100,8 @@ export class PostgresLeagueStore implements LeagueStore {
     await this.pool.query(
       `insert into leagues
          (league_id, owner_id, public_slug, relay_secret, league_name, ruleset, spice,
-          created_at, last_matchday)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+          created_at, last_matchday, fonte)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        on conflict (league_id) do update set
          owner_id = excluded.owner_id,
          public_slug = excluded.public_slug,
@@ -98,11 +109,13 @@ export class PostgresLeagueStore implements LeagueStore {
          league_name = excluded.league_name,
          ruleset = excluded.ruleset,
          spice = excluded.spice,
-         last_matchday = excluded.last_matchday`,
+         last_matchday = excluded.last_matchday,
+         fonte = excluded.fonte`,
       [
         config.leagueId, config.ownerId, config.publicSlug, config.relaySecret,
         config.leagueName,
         JSON.stringify(config.ruleset), config.spice, config.createdAt, config.lastMatchday,
+        config.fonte ? JSON.stringify(config.fonte) : null,
       ],
     );
   }
@@ -166,6 +179,34 @@ export class PostgresLeagueStore implements LeagueStore {
       `insert into league_rosters (league_id, roster) values ($1,$2)
        on conflict (league_id) do update set roster = excluded.roster`,
       [leagueId, JSON.stringify(LeagueRosterSchema.parse(roster))],
+    );
+  }
+
+  async getOsservazioni(season: string, matchday: number): Promise<Observation[]> {
+    const { rows } = await this.pool.query(
+      `select osservazione from serie_a_osservazioni
+       where season = $1 and matchday = $2 order by id`,
+      [season, matchday],
+    );
+    return rows.map((r) => r.osservazione as Observation);
+  }
+
+  async appendOsservazione(season: string, matchday: number, obs: Observation): Promise<void> {
+    await this.pool.query(
+      'insert into serie_a_osservazioni (season, matchday, osservazione) values ($1,$2,$3)',
+      [season, matchday, JSON.stringify(obs)],
+    );
+    // La potatura sta nella stessa transazione logica dell'inserimento: una
+    // tabella che cresce a ogni passata del cron e' una tabella che qualcuno
+    // dovra' potare a mano in un momento peggiore di questo.
+    await this.pool.query(
+      `delete from serie_a_osservazioni
+       where season = $1 and matchday = $2
+         and id not in (
+           select id from serie_a_osservazioni
+           where season = $1 and matchday = $2 order by id desc limit 12
+         )`,
+      [season, matchday],
     );
   }
 

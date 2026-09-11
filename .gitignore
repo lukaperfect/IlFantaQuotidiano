@@ -10,3 +10,6 @@ out/
 out/
 ci-out/
 ci-assets/
+
+# Lo store su file quando si esegue in locale: dati di esecuzione, non codice.
+.data/

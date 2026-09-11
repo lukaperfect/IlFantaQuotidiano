@@ -83,3 +83,20 @@ create table if not exists league_rosters (
   league_id  text primary key,
   roster     jsonb not null
 );
+
+-- Le osservazioni della giornata globale di Serie A: servono alla macchina a
+-- stati, che dichiara i voti stabili solo dopo letture consecutive identiche.
+-- Non sono per lega, come il piano globale a cui appartengono.
+create table if not exists serie_a_osservazioni (
+  id           bigserial primary key,
+  season       text not null,
+  matchday     integer not null,
+  osservazione jsonb not null
+);
+create index if not exists serie_a_osservazioni_giornata_idx
+  on serie_a_osservazioni (season, matchday, id);
+
+-- Da dove arrivano i dati della giornata, quando arrivano da soli. Aggiunta
+-- dopo, quindi come ALTER: uno schema che si applica solo ai database nuovi
+-- non e' uno schema.
+alter table leagues add column if not exists fonte jsonb;

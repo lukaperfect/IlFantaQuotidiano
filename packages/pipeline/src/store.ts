@@ -4,6 +4,7 @@ import type { Edition, FactPack, LeagueRoster, LeagueRuleset } from '@fantacomic
 import { LeagueRosterSchema } from '@fantacomics/core';
 import type { HistoricalMatchday, LeagueHistory, RarityCorpus } from '@fantacomics/facts';
 import { emptyMemory, type EditorialMemory } from '@fantacomics/editorial';
+import type { Observation } from '@fantacomics/ingest';
 
 /**
  * Lo stato persistente di una lega.
@@ -52,6 +53,17 @@ export type LeagueConfig = {
   createdAt: string;
   /** L'ultima giornata per cui esiste un'edizione. */
   lastMatchday: number | null;
+  /**
+   * Da dove arrivano i dati della giornata, quando arrivano da soli.
+   *
+   * `profilo` sceglie quale servizio interrogare — e' un nome, non un URL,
+   * perche' il servizio e' un dato versionato lato server. `leagueExternalId`
+   * e' come quel servizio chiama QUESTA lega.
+   *
+   * Assente significa che la lega non passa da un servizio: usa l'estensione
+   * o i file. Non e' uno stato degradato, e' l'altra meta' del prodotto.
+   */
+  fonte?: { profilo: string; leagueExternalId: string } | null;
 };
 
 /**
@@ -105,6 +117,24 @@ export interface LeagueStore {
    */
   listLeagues(ownerId: string): Promise<LeagueConfig[]>;
   getConfigForOwner(leagueId: string, ownerId: string): Promise<LeagueConfig | null>;
+  /**
+   * Le leghe che hanno una fonte automatica configurata.
+   *
+   * E' l'UNICO metodo che restituisce leghe senza passare da un proprietario,
+   * e la deroga va motivata perche' altrove quella regola e' la ragione per
+   * cui il controllo di proprieta' non si puo' dimenticare.
+   *
+   * La differenza e' chi chiede: gli altri metodi servono una RICHIESTA, e li'
+   * l'identita' di chi chiede e' tutto. Questo serve il pianificatore, che non
+   * e' un utente — e' il sistema che cerca il proprio lavoro da fare. Un cron
+   * che dovesse indovinare i proprietari per scoprire cosa consegnare non
+   * sarebbe piu' sicuro, sarebbe solo impossibile.
+   *
+   * Il nome e' deliberatamente quello di un compito, non di una lettura: non
+   * deve mai finire dietro una pagina. Restituisce solo leghe con `fonte`
+   * impostata, quindi non e' nemmeno un elenco completo.
+   */
+  legheDaConsegnare(): Promise<LeagueConfig[]>;
   getConfigBySlug(publicSlug: string): Promise<LeagueConfig | null>;
   /**
    * Risolve la chiave dell'estensione. E' l'unico modo per cui il relay sa a
@@ -136,6 +166,20 @@ export interface LeagueStore {
    */
   getRoster(leagueId: string): Promise<LeagueRoster | null>;
   saveRoster(leagueId: string, roster: LeagueRoster): Promise<void>;
+  /**
+   * Le osservazioni della giornata GLOBALE di Serie A.
+   *
+   * Stanno nello store e non in memoria perche' la macchina a stati decide
+   * sulla base di LETTURE CONSECUTIVE: due letture identiche significano voti
+   * stabili. Un processo di cron che parte, legge una volta e termina non
+   * accumulerebbe mai niente, e la giornata non sarebbe mai dichiarata pronta
+   * — cioe' la consegna automatica non partirebbe mai.
+   *
+   * Non sono per lega: sono di tutti, come il piano globale a cui
+   * appartengono.
+   */
+  getOsservazioni(season: string, matchday: number): Promise<Observation[]>;
+  appendOsservazione(season: string, matchday: number, obs: Observation): Promise<void>;
   /** Distribuzione cross-lega: il vantaggio competitivo che cresce con gli utenti. */
   getCorpus(): Promise<RarityCorpus | null>;
   addToCorpus(points: readonly number[]): Promise<void>;
@@ -205,12 +249,28 @@ export class FileLeagueStore implements LeagueStore {
     return this.readJson<LeagueConfig | null>(this.path('config', `${leagueId}.json`), null);
   }
 
-  async listLeagues(ownerId: string): Promise<LeagueConfig[]> {
+  /**
+   * Tutte le configurazioni presenti, dall'indice.
+   *
+   * Sta in un metodo privato perche' due chiamanti leggevano lo stesso indice
+   * scrivendone il percorso ciascuno per conto suo — e uno dei due lo aveva
+   * scritto sbagliato. Un percorso ripetuto e' un percorso che prima o poi
+   * diverge; ripetuto una volta sola non puo'.
+   */
+  private async tutteLeConfigurazioni(): Promise<LeagueConfig[]> {
     const index = await this.readJson<string[]>(this.path('leagues', '_index.json'), []);
     const configs = await Promise.all(index.map((id) => this.readConfig(id)));
-    return configs
-      .filter((c): c is LeagueConfig => c !== null && c.ownerId === ownerId)
+    return configs.filter((c): c is LeagueConfig => c !== null);
+  }
+
+  async listLeagues(ownerId: string): Promise<LeagueConfig[]> {
+    return (await this.tutteLeConfigurazioni())
+      .filter((c) => c.ownerId === ownerId)
       .sort((a, b) => a.leagueName.localeCompare(b.leagueName));
+  }
+
+  async legheDaConsegnare(): Promise<LeagueConfig[]> {
+    return (await this.tutteLeConfigurazioni()).filter((c) => !!c.fonte);
   }
 
   async getConfigForOwner(leagueId: string, ownerId: string): Promise<LeagueConfig | null> {
@@ -342,6 +402,26 @@ export class FileLeagueStore implements LeagueStore {
     await this.writeJson(this.path('rose', `${leagueId}.json`), LeagueRosterSchema.parse(roster));
   }
 
+  /**
+   * Si conservano le ultime osservazioni, non tutte: alla macchina a stati
+   * servono le ultime due o tre, e un file che cresce a ogni passata del cron
+   * e' un file che prima o poi qualcuno deve potare a mano.
+   */
+  private static readonly MAX_OSSERVAZIONI = 12;
+
+  async getOsservazioni(season: string, matchday: number): Promise<Observation[]> {
+    if (!SEGMENTO_VALIDO.test(season)) return [];
+    return this.readJson<Observation[]>(
+      this.path('osservazioni', `${season}-${matchday}.json`), [],
+    );
+  }
+
+  async appendOsservazione(season: string, matchday: number, obs: Observation): Promise<void> {
+    const storiche = await this.getOsservazioni(season, matchday);
+    const prossime = [...storiche, obs].slice(-FileLeagueStore.MAX_OSSERVAZIONI);
+    await this.writeJson(this.path('osservazioni', `${season}-${matchday}.json`), prossime);
+  }
+
   async getCorpus(): Promise<RarityCorpus | null> {
     const points = await this.readJson<number[]>(this.path('corpus.json'), []);
     return points.length === 0 ? null : { sortedTeamPoints: points };
@@ -360,10 +440,14 @@ export class InMemoryLeagueStore implements LeagueStore {
   private readonly editions = new Map<string, PublishedEdition>();
   private readonly configs = new Map<string, LeagueConfig>();
   private readonly rose = new Map<string, LeagueRoster>();
+  private readonly osservazioni = new Map<string, Observation[]>();
   private corpus: number[] = [];
 
   async listLeagues(ownerId: string): Promise<LeagueConfig[]> {
     return [...this.configs.values()].filter((c) => c.ownerId === ownerId);
+  }
+  async legheDaConsegnare(): Promise<LeagueConfig[]> {
+    return [...this.configs.values()].filter((c) => !!c.fonte);
   }
   async getConfigForOwner(leagueId: string, ownerId: string): Promise<LeagueConfig | null> {
     const c = this.configs.get(leagueId) ?? null;
@@ -398,6 +482,14 @@ export class InMemoryLeagueStore implements LeagueStore {
   }
   async saveRoster(leagueId: string, roster: LeagueRoster): Promise<void> {
     this.rose.set(leagueId, LeagueRosterSchema.parse(roster));
+  }
+
+  async getOsservazioni(season: string, matchday: number): Promise<Observation[]> {
+    return [...(this.osservazioni.get(`${season}:${matchday}`) ?? [])];
+  }
+  async appendOsservazione(season: string, matchday: number, obs: Observation): Promise<void> {
+    const k = `${season}:${matchday}`;
+    this.osservazioni.set(k, [...(this.osservazioni.get(k) ?? []), obs].slice(-12));
   }
 
   async getMemory(leagueId: string): Promise<EditorialMemory> { return this.state(leagueId).memory; }

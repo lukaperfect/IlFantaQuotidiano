@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { AdapterError } from './adapter.js';
 import { importaRoseXlsx, chiaveGiocatore, LAYOUT_CLASSIC } from './collectors/rose-xlsx.js';
@@ -272,5 +273,64 @@ describe('la chiave del giocatore', () => {
 
   it('e\' stabile: la stessa scrittura da sempre la stessa chiave', () => {
     expect(chiaveGiocatore('  Dodò  ')).toBe(chiaveGiocatore('Dodò'));
+  });
+});
+
+describe('il file vero della piattaforma', () => {
+  /**
+   * L'artefatto genuino, scaricato da una lega reale su leghe.fantacalcio.it.
+   *
+   * Vale piu' di qualunque foglio generato da me, perche' mette sotto test
+   * cio' che la piattaforma scrive davvero e non cio' che immagino scriva:
+   * zip con voci MEMORIZZATE (non compresse), stringhe IN LINEA (nessun
+   * sharedStrings), un `xl/metadata.xml` che nessun generatore mio produce, e
+   * il passo di tre colonne fra una squadra e l'altra.
+   */
+  const vero = readFileSync(new URL('./__fixtures__/rose-leghe-fantacalcio.xlsx', import.meta.url));
+  const esito = importaRoseXlsx(vero);
+
+  it('legge tutte le squadre e tutte le rose', () => {
+    expect(esito.diagnostica.foglio).toBe('ROSE');
+    expect(esito.diagnostica.squadre).toBe(10);
+    expect(esito.diagnostica.giocatori).toBe(250);
+  });
+
+  it('il checksum «totale» combacia su OGNI squadra', () => {
+    // Dieci controlli indipendenti che il file torna con se stesso.
+    expect(esito.diagnostica.totaliVerificati).toBe(10);
+    for (const s of esito.squadre) expect(s.crediti).toBe(s.totaleDichiarato);
+  });
+
+  it('ogni rosa ha il layout classico', () => {
+    for (const s of esito.squadre) {
+      const conta = (r: string) => s.giocatori.filter((g) => g.role === r).length;
+      expect([conta('P'), conta('D'), conta('C'), conta('A')]).toEqual([3, 8, 8, 6]);
+    }
+  });
+
+  it('250 giocatori danno 250 identificatori distinti', () => {
+    // La prova che la normalizzazione regge su nomi veri, accenti compresi:
+    // una sola collisione qui significherebbe due rose corrotte.
+    const ids = esito.squadre.flatMap((s) => s.giocatori.map((g) => g.playerId));
+    expect(new Set(ids).size).toBe(250);
+  });
+
+  it('tiene separati gli omonimi che la piattaforma distingue con le iniziali', () => {
+    const per = (id: string) => esito.anagrafica.get(id);
+    // Marcus e Khephren Thuram: due persone, due ruoli, due squadre.
+    expect(per('thuram')?.role).toBe('A');
+    expect(per('thuram-k')?.role).toBe('C');
+    expect(per('adams-c')).toBeDefined();
+    expect(per('adams-a')).toBeDefined();
+    expect(per('esposito-se')).toBeDefined();
+    expect(per('esposito-f-p')).toBeDefined();
+  });
+
+  it('porta i prezzi d\'asta come numeri', () => {
+    const tutti = esito.squadre.flatMap((s) => s.giocatori);
+    expect(tutti.every((g) => typeof g.purchasePrice === 'number')).toBe(true);
+    const piuPagato = [...tutti].sort((a, b) => b.purchasePrice - a.purchasePrice)[0]!;
+    expect(piuPagato.purchasePrice).toBe(460);
+    expect(piuPagato.role).toBe('A');
   });
 });

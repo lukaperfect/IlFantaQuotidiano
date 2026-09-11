@@ -123,6 +123,11 @@ jobs:
       FANTACOMICS_SECRET: chiave-di-prova-lunga-abbastanza-per-la-ci-000
       FANTACOMICS_MAIL_LOG: /tmp/posta.jsonl
       FANTACOMICS_URL: http://localhost:3000
+      # Il cron e il servizio finto della verifica della consegna automatica.
+      # La porta e' fissa perche' l'app legge l'indirizzo all'avvio, cioe'
+      # prima che il servizio esista.
+      FANTACOMICS_CRON_SECRET: segreto-del-cron-della-ci-abbastanza-lungo
+      FANTACOMICS_FONTE_URL: http://127.0.0.1:4174
       # NIENTE `NODE_ENV: production` a livello di job: farebbe installare a
       # pnpm le sole dipendenze di produzione, e tsx, vitest e playwright
       # sparirebbero prima ancora di arrivare al primo passo che li usa.
@@ -167,6 +172,13 @@ jobs:
 
       - name: Relay autenticato
         run: pnpm exec tsx apps/worker/src/scripts/verifica-relay.ts
+
+      - name: Consegna automatica dal servizio
+        # Il percorso che nessun umano guarda: un servizio risponde, la
+        # macchina a stati decide, il giornale esce da solo. Verifica anche
+        # che una giornata a META' NON venga pubblicata — su questo percorso
+        # non c'e' nessuno a fermarla.
+        run: pnpm exec tsx apps/worker/src/scripts/verifica-fonte.ts
 
       - name: Rose dal foglio della piattaforma
         # Senza argomento la verifica genera un foglio con la stessa forma di

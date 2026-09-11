@@ -170,6 +170,71 @@ for (const impl of implementazioni) {
       expect(await env.league.getRoster('lega-1')).toBeNull();
     });
 
+    it('accumula le osservazioni della giornata globale, in ordine', async () => {
+      const obs = (hash: string) => ({
+        fetchedAt: `2026-01-0${hash}T10:00:00.000Z`, contentHash: `h${hash}`,
+        matchesFinished: 10, matchesTotal: 10, playersRated: 200, playersExpected: 250,
+      });
+      expect(await env.league.getOsservazioni('2025-26', 7)).toEqual([]);
+      await env.league.appendOsservazione('2025-26', 7, obs('1'));
+      await env.league.appendOsservazione('2025-26', 7, obs('2'));
+      const lette = await env.league.getOsservazioni('2025-26', 7);
+      // L'ORDINE e' tutto: la macchina a stati guarda le ultime letture, e
+      // leggerle al contrario direbbe "stabile" nel momento sbagliato.
+      expect(lette.map((o) => o.contentHash)).toEqual(['h1', 'h2']);
+    });
+
+    it('le osservazioni non si mescolano fra giornate ne fra stagioni', async () => {
+      const obs = { fetchedAt: '2026-01-01T10:00:00.000Z', contentHash: 'x',
+        matchesFinished: 1, matchesTotal: 10, playersRated: 20, playersExpected: 250 };
+      await env.league.appendOsservazione('2025-26', 7, obs);
+      expect(await env.league.getOsservazioni('2025-26', 8)).toEqual([]);
+      expect(await env.league.getOsservazioni('2024-25', 7)).toEqual([]);
+    });
+
+    it('non cresce senza limite a ogni passata del cron', async () => {
+      for (let i = 0; i < 20; i++) {
+        await env.league.appendOsservazione('2025-26', 9, {
+          fetchedAt: '2026-01-01T10:00:00.000Z', contentHash: `h${i}`,
+          matchesFinished: i, matchesTotal: 10, playersRated: i, playersExpected: 250,
+        });
+      }
+      const lette = await env.league.getOsservazioni('2025-26', 9);
+      expect(lette.length).toBeLessThanOrEqual(12);
+      // E cio' che resta sono le PIU' RECENTI: potare dalla parte sbagliata
+      // lascerebbe la storia vecchia e butterebbe quella che serve.
+      expect(lette[lette.length - 1]?.contentHash).toBe('h19');
+    });
+
+    it('il pianificatore vede solo le leghe con una fonte automatica', async () => {
+      await env.league.saveConfig(lega({ leagueId: 'a-mano', publicSlug: 'slug-a-mano' }));
+      await env.league.saveConfig(lega({
+        leagueId: 'automatica', publicSlug: 'slug-auto',
+        fonte: { profilo: 'servizio-di-prova', leagueExternalId: 'ext-99' },
+      }));
+      const daFare = await env.league.legheDaConsegnare();
+      expect(daFare.map((c) => c.leagueId)).toEqual(['automatica']);
+      expect(daFare[0]?.fonte?.leagueExternalId).toBe('ext-99');
+    });
+
+    it('la fonte sopravvive al giro su disco o su jsonb', async () => {
+      await env.league.saveConfig(lega({
+        fonte: { profilo: 'servizio-di-prova', leagueExternalId: 'ext-1' },
+      }));
+      const letta = await env.league.getConfigForOwner('lega-1', 'acc-mario');
+      expect(letta?.fonte).toEqual({ profilo: 'servizio-di-prova', leagueExternalId: 'ext-1' });
+    });
+
+    it('togliere la fonte la toglie davvero, e la lega esce dai compiti', async () => {
+      await env.league.saveConfig(lega({
+        fonte: { profilo: 'servizio-di-prova', leagueExternalId: 'ext-1' },
+      }));
+      expect(await env.league.legheDaConsegnare()).toHaveLength(1);
+      await env.league.saveConfig(lega({ fonte: null }));
+      expect(await env.league.legheDaConsegnare()).toHaveLength(0);
+      expect((await env.league.getConfigForOwner('lega-1', 'acc-mario'))?.fonte ?? null).toBeNull();
+    });
+
     it('isola i proprietari', async () => {
       await env.league.saveConfig(lega());
       await env.league.saveConfig(lega({

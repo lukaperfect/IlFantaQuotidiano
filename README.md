@@ -342,13 +342,94 @@ tutte.
 Misurato sul file di una lega vera: 10 squadre, 250 giocatori, 250 chiavi
 distinte, zero collisioni, e il `totale` che combacia su 10 blocchi su 10.
 
+## La consegna automatica: i dati della giornata arrivano da soli
+
+Il percorso da file resta, ed e' l'interruttore di emergenza. Ma un prodotto
+settimanale che chiede cinque caricamenti a mano ogni lunedi' non arriva alla
+terza giornata: l'abitudine si costruisce solo se il giornale compare senza che
+nessuno faccia niente.
+
+`FonteHttp` scarica i payload da un servizio e li passa alla STESSA mappatura e
+agli STESSI costruttori dell'estensione e dei CSV. Non e' un modo di dire: e'
+la stessa funzione, e c'e' un test che pretende snapshot **identici** dagli
+stessi payload presi per le due strade. Se divergessero, lo stesso turno
+darebbe due giornali diversi a seconda di come sono entrati i dati.
+
+Cambiare fornitore e' un profilo nuovo — dati, non codice — perche' URL,
+autenticazione e nomi dei campi vivono in un profilo versionato lato server,
+esattamente come per l'estensione.
+
+### I due piani hanno disponibilita' molto diverse, e confonderli fa pianificare cose che non esistono
+
+Il piano **globale** — cosa e' successo in Serie A — e' quello per cui un
+servizio ha senso: esistono fornitori che lo vendono. Attenzione pero' al voto:
+il *voto* del fantacalcio non e' un dato di cronaca, e' un giudizio
+redazionale di una testata. Un servizio di statistiche fornisce gli eventi, non
+necessariamente il voto — e senza voto il fantavoto si puo' solo stimare, che
+e' un prodotto diverso e va detto all'utente invece che scoperto da lui.
+
+Il piano **della lega** — chi ha schierato chi questa settimana, il calendario
+degli scontri — e' dato privato dentro la lega dell'utente. Nessun servizio
+terzo ce l'ha, perche' non e' suo: esiste solo dietro le credenziali del
+proprietario. Per quello la strada resta l'estensione, che legge nella sessione
+gia' autenticata senza custodire credenziali.
+
+Per questo `piano` e' una proprieta' di ogni **endpoint** e non della fonte
+intera: un profilo puo' prendere il globale da un servizio e lasciare il piano
+della lega all'estensione.
+
+### La lettura globale e' una per giornata, non una per lega
+
+E' l'inversione architetturale del progetto resa esecutiva: la cache vive
+dentro l'oggetto fonte, quindi dieci leghe sulla stessa giornata fanno UNA
+richiesta di Serie A. Su un'API a consumo e' la differenza fra un costo e un
+problema. La verifica lo misura dall'interno del servizio finto — non da una
+spia messa nel nostro codice: tre leghe, una lettura di `/voti`, tre di
+`/formazioni`.
+
+### Quando pubblicare: due cancelli, e il secondo non e' ridondante
+
+Il primo e' strutturale: una squadra di Serie A che non ha giocato non ha
+nessun voto. Il secondo guarda la quota di voti, e serve perche' il primo da
+solo si apre troppo presto su questo percorso — i voti si pubblicano a poco a
+poco, e appena ogni squadra ha il suo primo voto il cancello strutturale
+passerebbe. Misurato: con il 20% dei voti distribuiti su tutte le squadre il
+rapporto e' al 18% mentre tutte le squadre risultano «in campo». Uscirebbe un
+giornale con nove decimi dei giocatori senza voto, e la riconciliazione non se
+ne accorgerebbe, perche' punteggi parziali ufficiali tornano benissimo con
+punteggi parziali ricalcolati.
+
+Il denominatore giusto e' **chi e' sceso in campo**, non i titolari schierati:
+chi ha giocato dei minuti ha un voto per definizione, mentre fra i titolari i
+senza voto sono legittimi — ed e' esattamente la quantita' che avevo gia'
+sbagliato a calibrare una volta. Con quel denominatore una soglia alta e'
+giustificata invece che indovinata. Se un fornitore non desse i minuti il
+cancello non sarebbe calcolabile: invece di restare chiuso per sempre in
+silenzio, l'importatore dice quale campo manca.
+
+In piu' servono **due letture consecutive identiche**: e' la prova che i voti
+si sono fermati. Sul percorso dell'estensione non e' possibile chiederlo —
+c'e' una persona che preme quando le pare — ma il cron ripassa da solo.
+
+### Il cron
+
+`POST /api/tick`, autenticato con un segreto. E' chiuso non perche' restituisca
+dati di qualcuno, ma perche' **costa**: ogni passata interroga un servizio a
+consumo e puo' far girare la pipeline su tutte le leghe collegate. Lasciato
+aperto non sarebbe una fuga di dati, sarebbe una fattura. Senza segreto
+configurato l'endpoint e' chiuso, non aperto.
+
 ## Cosa manca
 
 Per andare in produzione servono, nell'ordine:
 
-1. **I nomi dei campi veri per le GIORNATE.** Le rose ora si leggono dal file
-   che la piattaforma produce; quello che manca e' il profilo per voti e
-   formazioni.
+1. **Un fornitore vero per il piano globale.** La catena HTTP c'e' ed e'
+   verificata end-to-end contro un servizio finto; quello che manca e' un
+   profilo puntato su un servizio reale, con la sua chiave — ed e'
+   esattamente la parte progettata per essere un dato. Da valutare prima:
+   se quel servizio dia il *voto* del fantacalcio o solo gli eventi.
+   Per il piano della lega non esiste un'API terza, e non puo' esistere:
+   quei dati stanno dentro la lega privata dell'utente.
 2. **Un provider di posta vero**: il `Mailer` è un'interfaccia con
    implementazioni su console e su file. Serve collegarci un servizio prima di
    far accedere qualcuno che non sia sulla stessa macchina.

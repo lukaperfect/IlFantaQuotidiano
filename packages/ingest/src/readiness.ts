@@ -213,3 +213,27 @@ export function osservazioneDaGiornata(
  * giornata completa misura fra il 67% e l'81%, quindi il margine c'e'.
  */
 export const POLITICA_LETTURA_SINGOLA: ReadinessPolicy = { minRatedRatio: 0.5, stableReads: 1 };
+
+/**
+ * La politica del percorso automatico.
+ *
+ * Numeri identici al valore predefinito, ma il nome dice a quale strada
+ * appartengono e il commento dice perche' reggono — che e' l'informazione che
+ * serve il giorno in cui qualcuno vorra' cambiarli.
+ *
+ * `stableReads: 2` qui e' possibile e necessario. Possibile perche' il cron
+ * ripassa da solo, a differenza dell'estensione dove c'e' una persona che
+ * preme quando le pare. Necessario perche' il controllo strutturale, da solo,
+ * si apre troppo presto su questo percorso: i voti arrivano a poco a poco, e
+ * appena OGNI squadra ha il suo primo voto il cancello passerebbe. Misurato:
+ * con il 20% dei voti distribuiti su tutte le squadre il rapporto e' al 18%
+ * ma tutte le squadre risultano "in campo".
+ *
+ * `minRatedRatio: 0.9` e' alto e stavolta e' giustificato, non indovinato,
+ * perche' cambia il DENOMINATORE: qui si contano i giocatori che hanno
+ * giocato dei minuti, non i titolari schierati. Chi e' sceso in campo ha un
+ * voto per definizione — e' la promessa di chi i voti li pubblica — mentre i
+ * titolari schierati includono i senza voto legittimi, che sono proprio la
+ * quantita' che avevo sbagliato a calibrare la prima volta.
+ */
+export const POLITICA_CRON: ReadinessPolicy = { minRatedRatio: 0.9, stableReads: 2 };
