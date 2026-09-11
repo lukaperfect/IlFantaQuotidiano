@@ -721,6 +721,42 @@ sembra pronto e fallisce al primo dato vero, ed e' esattamente l'errore contro
 cui e' costruito il resto del progetto. Si ricavano con `ispeziona-fonte.ts`
 eseguito da una macchina che quel sito lo raggiunge.
 
+### Ricavarli senza avere un terminale
+
+Serve un browser e nient'altro. `strumenti/raccogli-fonte.js` si incolla nella
+console degli strumenti per sviluppatori (F12), sulla pagina dei voti, e salva
+un file; quel file si porta qui e lo legge l'ispettore:
+
+    pnpm exec tsx apps/worker/src/scripts/ispeziona-fonte.ts --file fantacomics-raccolta.json
+
+Il raccoglitore **non analizza niente**, ed e' deliberato. Raccoglie tre cose:
+il DOM *dopo* che il JavaScript della pagina ha girato — diverso dal file di
+«salva pagina», dove spesso i dati non ci sono ancora —, gli indirizzi gia'
+interrogati dalla pagina, e il **corpo** delle risposte alle richieste che la
+pagina fa da li' in avanti. E' l'unica strada quando i dati non stanno
+nell'HTML ma arrivano dopo, che e' il caso normale.
+
+Perche' non analizzi lui: se avesse una sua euristica per scegliere «il blocco
+buono», il giorno in cui diverge da quella della fonte direbbe «trovato» su
+qualcosa che in produzione non si trova mai. L'analisi sta in un posto solo.
+
+Non prende **intestazioni ne' cookie**, e svuota i valori dei campi che si
+chiamano come una credenziale — `authToken`, `csrfToken`, `apiKey` — lasciando
+il nome: cosi' si vede che quel campo esiste senza riceverne il contenuto.
+L'elenco dei nomi e' corto e preciso apposta: la versione generosa — «tutto
+cio' che contiene auth» — cancellerebbe anche `author`, e cancellare un campo
+vero da un file che serve a leggere i nomi dei campi significa consegnare
+un'analisi sbagliata per prudenza. Non e' una garanzia assoluta e non viene
+presentata come tale, quindi l'avviso a schermo resta comunque.
+
+`verifica-raccolta.ts` lo esercita in un Chromium vero contro un sito finto che
+si comporta come quelli veri, e controlla anche cio' che **non** deve fare:
+rompere la pagina di chi lo incolla — leggere il corpo di una risposta senza
+clonarla la rompe davvero, e leggere `responseText` su una XHR con
+`responseType: 'json'` lancia — e portarsi via un segreto. La prima versione se
+lo portava via: stava nello script incorporato della pagina, non
+nell'indirizzo. L'ha detto la verifica, non una rilettura del codice.
+
 ## Il pagamento
 
 4,99 € **una tantum per lega e per stagione**. Non un abbonamento: chi gioca al

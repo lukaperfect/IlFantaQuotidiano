@@ -71,12 +71,12 @@ jobs:
           "
 
 
-      - name: Sintassi dei file dell'estensione
-        # L'estensione e' JavaScript semplice: `tsc` non la copre, quindi un
-        # errore di sintassi passerebbe fino al browser dell'utente. `--check`
-        # costa millisecondi e chiude quel buco.
+      - name: Sintassi dei file JavaScript che girano nel browser
+        # Estensione e strumenti da console sono JavaScript semplice: `tsc` non
+        # li copre, quindi un errore di sintassi passerebbe fino al browser
+        # dell'utente. `--check` costa millisecondi e chiude quel buco.
         run: |
-          for f in apps/extension/src/*.js; do
+          for f in apps/extension/src/*.js strumenti/*.js; do
             node --check "$f" || exit 1
           done
           node -e "JSON.parse(require('fs').readFileSync('apps/extension/manifest.json','utf8'))"
@@ -229,6 +229,14 @@ jobs:
         # scarica i propri dati come farebbe un sito: intercettazione,
         # mappatura, relay, giornale pubblicato.
         run: pnpm exec tsx apps/extension/test/verifica.ts
+
+      - name: Il raccoglitore da browser, su un sito finto
+        # `strumenti/raccogli-fonte.js` gira dove nessun test unitario arriva:
+        # la console di un browser, sulla pagina di qualcun altro. E' anche
+        # l'unico pezzo che maneggia dati altrui — la pagina di chi lo incolla,
+        # cookie esclusi — quindi qui si verifica pure che i valori dei campi
+        # che sembrano credenziali non finiscano nel file che ne esce.
+        run: pnpm exec tsx apps/worker/src/scripts/verifica-raccolta.ts
 
       - name: PDF e PNG generati davvero con Chromium
         # Il README promette un broadsheet A3 e le card in PNG. Erano l'unica

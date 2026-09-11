@@ -20,7 +20,13 @@
 
 import { scaricaRobots, consentito, jsonDentroHtml, scegliBlocco } from '@fantacomics/ingest';
 
-type Argomenti = { url: string; headers: Record<string, string>; profondita: number };
+type Argomenti = {
+  url: string;
+  /** Una pagina gia' salvata, da ispezionare senza chiedere niente a nessuno. */
+  file: string;
+  headers: Record<string, string>;
+  profondita: number;
+};
 
 /**
  * Anche l'ispettore fa una richiesta al sito di qualcun altro, quindi si
@@ -38,9 +44,11 @@ function leggiArgomenti(argv: string[]): Argomenti {
   let url = '';
   let profondita = 3;
 
+  let file = '';
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--url') url = argv[++i] ?? '';
+    else if (a === '--file') file = argv[++i] ?? '';
     else if (a === '--header') {
       const grezzo = argv[++i] ?? '';
       const taglio = grezzo.indexOf(':');
@@ -52,7 +60,7 @@ function leggiArgomenti(argv: string[]): Argomenti {
   if (chiave && !Object.keys(headers).some((h) => /auth|key|token/i.test(h))) {
     headers.authorization = `Bearer ${chiave}`;
   }
-  return { url, headers, profondita };
+  return { url, file, headers, profondita };
 }
 
 /** Il tipo di un valore, in una parola, piu' un campione corto. */
@@ -126,9 +134,50 @@ const INDIZI: Record<string, RegExp> = {
 };
 
 async function main(): Promise<void> {
-  const { url, headers, profondita } = leggiArgomenti(process.argv.slice(2));
+  const { url, file, headers, profondita } = leggiArgomenti(process.argv.slice(2));
+
+  /**
+   * `--file`: ispeziona qualcosa che e' GIA' STATO SCARICATO da qualcun altro.
+   *
+   * Serve a chi non ha un terminale sulla macchina che quel sito lo raggiunge —
+   * e serve anche qui dentro, dove il dominio e' bloccato. Accetta tre cose, e
+   * le riconosce da sole: una risposta JSON, una pagina HTML salvata, o il file
+   * prodotto da `strumenti/raccogli-fonte.js` nella console del browser.
+   *
+   * L'analisi e' sempre la stessa, con le stesse funzioni che poi usera' la
+   * fonte vera: un'analisi scritta a parte direbbe «ho trovato» su qualcosa che
+   * in produzione non si trova.
+   */
+  if (file) {
+    const { readFile } = await import('node:fs/promises');
+    let contenuto: string;
+    try {
+      contenuto = await readFile(file, 'utf8');
+    } catch {
+      console.error(`Non riesco a leggere "${file}".`);
+      process.exit(1);
+    }
+    console.log(`Ispeziono il file ${file} (${contenuto.length} byte)\n`);
+
+    let corpo: unknown;
+    try {
+      corpo = JSON.parse(contenuto);
+    } catch {
+      analizzaPagina(contenuto, profondita);
+      return;
+    }
+    if (sembraRaccolta(corpo)) {
+      analizzaRaccolta(corpo, profondita);
+      return;
+    }
+    console.log('E\' JSON.\n');
+    riassumi(corpo, profondita);
+    return;
+  }
+
   if (!url) {
-    console.error('Serve --url. Esempio:\n' +
+    console.error('Serve --url oppure --file. Esempi:\n' +
+      '  pnpm exec tsx apps/worker/src/scripts/ispeziona-fonte.ts --file pagina-salvata.html\n' +
       '  pnpm exec tsx apps/worker/src/scripts/ispeziona-fonte.ts \\\n' +
       '    --url "https://api.esempio.org/v4/competitions/SA/matches?matchday=1" \\\n' +
       '    --header "X-Auth-Token: LA_TUA_CHIAVE"');
@@ -199,31 +248,12 @@ async function main(): Promise<void> {
      * i dati erano li' sotto.
      */
     console.log('La risposta non e\' JSON: e\' una pagina. Cerco il JSON dentro l\'HTML.\n');
-    const trovati = jsonDentroHtml(testo);
-    if (trovati.length === 0) {
-      console.log('   Nessun blocco JSON incorporato trovato.');
-      console.log('   Resta la strada piu\' affidabile: apri la pagina nel browser, scheda');
-      console.log('   Rete, filtra su Fetch/XHR e guarda quale indirizzo restituisce i voti.');
-      console.log('   Poi rilancia questo comando su QUELL\'indirizzo.\n');
-      console.log('Primi 300 caratteri di quello che e\' arrivato:\n');
-      console.log(testo.slice(0, 300));
-      process.exit(1);
+    if (!risposta.ok) {
+      console.log(`(attenzione: il servizio ha risposto ${risposta.status}, quindi questa`);
+      console.log('potrebbe essere una pagina di errore e non quella dei dati)\n');
     }
-
-    console.log(`   ${trovati.length} blocchi JSON incorporati:\n`);
-    for (const t of trovati) {
-      console.log(`   ${t.dove.padEnd(34)} ${t.byte} byte`);
-    }
-    /**
-     * Si sceglie con la STESSA funzione che usera' la fonte quando leggera'
-     * davvero. Due euristiche diverse — una qui e una li' — direbbero «ho
-     * trovato» su un blocco che poi la fonte non prende.
-     */
-    const scelto = scegliBlocco(trovati)!;
-    console.log(`\n   Ispeziono: ${scelto.dove}`);
-    console.log('   Nel profilo: estrazione: "json-in-html"'
-      + (scelto.id ? `, bloccoHtml: "${scelto.id}"` : '') + '\n');
-    corpo = scelto.valore;
+    analizzaPagina(testo, profondita);
+    return;
   }
 
   if (!risposta.ok) {
@@ -232,6 +262,133 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  riassumi(corpo, profondita);
+}
+
+/**
+ * Una pagina HTML: elenca i blocchi JSON incorporati e ne ispeziona uno.
+ *
+ * Da' una PANORAMICA di tutti i blocchi e il dettaglio solo di quello che la
+ * fonte prenderebbe davvero. Mostrarli tutti per esteso seppellirebbe la
+ * risposta utile sotto il blob della pubblicita'; mostrarne uno solo
+ * nasconderebbe il caso in cui l'euristica ha preso quello sbagliato, che e'
+ * esattamente il momento in cui si ha bisogno di vedere gli altri.
+ */
+function analizzaPagina(html: string, profondita: number): void {
+  const trovati = jsonDentroHtml(html);
+  if (trovati.length === 0) {
+    console.log('Nessun blocco JSON dentro la pagina.');
+    console.log('Se i dati si vedono a schermo ma non sono qui dentro, la pagina li carica');
+    console.log('DOPO, con una richiesta a parte. Due strade:');
+    console.log('  - la scheda Rete del browser, filtro Fetch/XHR, e si guarda chi risponde;');
+    console.log('  - strumenti/raccogli-fonte.js incollato nella console, che quelle');
+    console.log('    richieste le registra da solo.');
+    return;
+  }
+
+  console.log(`${trovati.length} blocchi JSON incorporati:\n`);
+  for (const t of trovati) {
+    const liste = elenchi(t.valore, '', profondita).sort((a, b) => b.quanti - a.quanti);
+    const piuGrande = liste[0];
+    console.log(`   ${t.dove.padEnd(34)} ${String(t.byte).padStart(9)} byte`
+      + (piuGrande ? `   elenco piu' lungo: ${piuGrande.percorso} (${piuGrande.quanti})` : '   nessun elenco'));
+  }
+
+  const scelto = scegliBlocco(trovati);
+  if (!scelto) return;
+  console.log(`\nIspeziono: ${scelto.dove}`);
+  console.log('Nel profilo: estrazione: "json-in-html"'
+    + (scelto.id ? `, bloccoHtml: "${scelto.id}"` : '') + '\n');
+  riassumi(scelto.valore, profondita);
+}
+
+/** Il file prodotto da `strumenti/raccogli-fonte.js`. */
+type Raccolta = {
+  fantacomics: string;
+  quando?: unknown;
+  indirizzo?: unknown;
+  titolo?: unknown;
+  pagina?: unknown;
+  rete?: unknown;
+};
+
+function sembraRaccolta(v: unknown): v is Raccolta {
+  return v !== null && typeof v === 'object'
+    && typeof (v as { fantacomics?: unknown }).fantacomics === 'string';
+}
+
+/**
+ * Il raccolto di una sessione di browser.
+ *
+ * Contiene due cose che nessun `curl` puo' dare: la pagina DOPO che il suo
+ * JavaScript ha girato, e le risposte alle richieste che la pagina fa da sola.
+ * Sui siti moderni i dati stanno quasi sempre nella seconda, quindi si guarda
+ * prima la rete e solo dopo il documento.
+ */
+function analizzaRaccolta(r: Raccolta, profondita: number): void {
+  console.log(`Raccolta da browser (${r.fantacomics})`);
+  if (typeof r.indirizzo === 'string') console.log(`Pagina: ${r.indirizzo}`);
+  if (typeof r.titolo === 'string') console.log(`Titolo: ${r.titolo}`);
+  if (typeof r.quando === 'string') console.log(`Quando: ${r.quando}`);
+
+  const rete = Array.isArray(r.rete) ? (r.rete as Record<string, unknown>[]) : [];
+  const conCorpo: { url: string; corpo: unknown; quanti: number }[] = [];
+
+  console.log(`\n══ RETE — ${rete.length} indirizzi interrogati dalla pagina\n`);
+  for (const voce of rete) {
+    const url = typeof voce.url === 'string' ? voce.url : '(senza indirizzo)';
+    const corpo = typeof voce.corpo === 'string' ? voce.corpo : null;
+    let quanti = -1;
+    let letto: unknown;
+    if (corpo) {
+      try {
+        letto = JSON.parse(corpo);
+        const liste = elenchi(letto, '', profondita).sort((a, b) => b.quanti - a.quanti);
+        quanti = liste[0]?.quanti ?? 0;
+      } catch {
+        quanti = -1;
+      }
+    }
+    const nota = corpo === null
+      ? 'solo indirizzo, contenuto non catturato'
+      : quanti < 0 ? 'contenuto non JSON'
+      : `JSON, elenco piu\' lungo ${quanti}`;
+    console.log(`   ${nota.padEnd(38)} ${url}`);
+    if (letto !== undefined && quanti > 0) conCorpo.push({ url, corpo: letto, quanti });
+  }
+
+  /**
+   * Le candidate si ispezionano dalla piu' popolosa: un endpoint che
+   * restituisce quattrocento righe e' la lista dei voti molto piu'
+   * probabilmente di uno che ne restituisce tre. Ci si ferma a tre perche'
+   * oltre e' rumore, ma l'elenco qui sopra le nomina tutte.
+   */
+  conCorpo.sort((a, b) => b.quanti - a.quanti);
+  for (const c of conCorpo.slice(0, 3)) {
+    console.log(`\n══ RISPOSTA DI ${c.url}\n`);
+    riassumi(c.corpo, profondita);
+  }
+  if (conCorpo.length === 0) {
+    console.log('\n   Nessuna risposta con contenuto: quelle richieste erano gia\' partite');
+    console.log('   prima che il raccoglitore fosse attivo. Sulla pagina basta cambiare');
+    console.log('   giornata e rieseguire  fantacomicsEsporta()');
+  }
+
+  if (typeof r.pagina === 'string' && r.pagina.length > 0) {
+    console.log(`\n══ DOCUMENTO — ${r.pagina.length} byte di HTML\n`);
+    analizzaPagina(r.pagina, profondita);
+  }
+}
+
+/**
+ * Il riassunto di un corpo gia' letto.
+ *
+ * Sta in una funzione perche' i percorsi che ci arrivano sono due — una
+ * richiesta HTTP e un file salvato — e devono produrre lo STESSO esito. Due
+ * copie divergerebbero il giorno in cui una delle due impara qualcosa, e chi
+ * ha solo il browser riceverebbe un'analisi diversa da chi ha il terminale.
+ */
+function riassumi(corpo: unknown, profondita: number): void {
   console.log('── Chiavi di primo livello');
   if (corpo !== null && typeof corpo === 'object' && !Array.isArray(corpo)) {
     for (const [k, v] of Object.entries(corpo)) console.log(`   ${k}: ${descrivi(v)}`);
