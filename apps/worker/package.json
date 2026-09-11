@@ -5,17 +5,18 @@
   "type": "module",
   "main": "./src/index.ts",
   "dependencies": {
-    "@fantacomics/pipeline": "workspace:*",
-    "@fantacomics/core": "workspace:*",
-    "@fantacomics/scoring": "workspace:*",
-    "@fantacomics/facts": "workspace:*",
-    "@fantacomics/editorial": "workspace:*",
-    "@fantacomics/llm": "workspace:*",
-    "@fantacomics/render": "workspace:*",
-    "@fantacomics/ingest": "workspace:*",
-    "playwright": "^1.49.0",
     "@fantacomics/auth": "workspace:*",
-    "pg": "^8.13.1"
+    "@fantacomics/billing": "workspace:*",
+    "@fantacomics/core": "workspace:*",
+    "@fantacomics/editorial": "workspace:*",
+    "@fantacomics/facts": "workspace:*",
+    "@fantacomics/ingest": "workspace:*",
+    "@fantacomics/llm": "workspace:*",
+    "@fantacomics/pipeline": "workspace:*",
+    "@fantacomics/render": "workspace:*",
+    "@fantacomics/scoring": "workspace:*",
+    "pg": "^8.13.1",
+    "playwright": "^1.49.0"
   },
   "devDependencies": {
     "@types/pg": "^8.11.10"

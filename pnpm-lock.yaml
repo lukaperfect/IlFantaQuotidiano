@@ -54,6 +54,9 @@ importers:
       '@fantacomics/auth':
         specifier: workspace:*
         version: link:../../packages/auth
+      '@fantacomics/billing':
+        specifier: workspace:*
+        version: link:../../packages/billing
       '@fantacomics/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -106,6 +109,9 @@ importers:
       '@fantacomics/auth':
         specifier: workspace:*
         version: link:../../packages/auth
+      '@fantacomics/billing':
+        specifier: workspace:*
+        version: link:../../packages/billing
       '@fantacomics/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -142,6 +148,12 @@ importers:
         version: 8.23.1
 
   packages/auth:
+    dependencies:
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+
+  packages/billing:
     dependencies:
       zod:
         specifier: ^3.24.1

@@ -3,12 +3,12 @@
 Genera automaticamente un giornale sportivo satirico personalizzato per ogni
 lega di fantacalcio, a partire dai dati ufficiali della giornata.
 
-> **Stato**: prodotto funzionante end-to-end, con account, isolamento fra
-> proprietari e persistenza su Postgres. Un admin accede, carica il file delle
-> rose e ha subito il primo numero; collegata la fonte, le edizioni escono da
-> sole. Escono in **due tipi**: la *vigilia* la mattina in cui si comincia a
-> giocare e il *retrospettivo* la mattina dopo l'ultima partita. Manca il
-> pagamento: vedi [Cosa manca](#cosa-manca).
+> **Stato**: il giro completo funziona end-to-end. Un admin accede, carica il
+> file delle rose, **attiva la lega per 4,99 € una tantum** e da quel momento il
+> giornale esce due volte a settimana: la *vigilia* la mattina in cui si comincia
+> a giocare, il *retrospettivo* la mattina dopo l'ultima partita. Account,
+> isolamento fra proprietari e persistenza su Postgres. Quel che resta e'
+> configurazione e fornitori: vedi [Cosa manca](#cosa-manca).
 
 ## La tesi architetturale
 
@@ -637,14 +637,86 @@ scegliere. Un accoppiamento automatico su un nome somigliante e' il modo piu'
 rapido di mappare il campo sbagliato senza accorgersene. La chiave non viene
 mai stampata, nemmeno dentro l'URL in caso di errore.
 
+## Il pagamento
+
+4,99 € **una tantum per lega e per stagione**. Non un abbonamento: chi gioca al
+fantacalcio paga l'iscrizione alla lega una volta all'anno, e un addebito
+mensile su un prodotto che vive da settembre a maggio e' una disdetta
+annunciata.
+
+**Il diritto sta sulla LEGA, non sull'account.** Metterlo sull'account avrebbe
+significato che il primo pagamento apre tutte le leghe presenti e future dello
+stesso proprietario — cioe' un prodotto gratis per chiunque abbia un amico che
+paga. Ed e' **per stagione**: pagare il 2025-26 non apre il 2026-27.
+
+### Il cancello sta prima delle spese
+
+Dopo il controllo si interroga un servizio a consumo e si fa girare un modello a
+pagamento. Un cancello messo alla fine avrebbe lasciato che una lega non pagata
+costasse esattamente quanto una pagata, con l'unica differenza che il giornale
+non si vede.
+
+I percorsi verso quella spesa erano **tre**, non uno: il pianificatore, la
+vigilia fatta uscire a mano, e l'import da CSV. Ne avevo chiusi due, e il terzo
+avrebbe continuato a pubblicare gratis — un controllo applicato su due percorsi
+su tre vale quanto il percorso che lascia aperto. Il test di sicurezza guidato
+da browser e' quello che l'ha trovato.
+
+L'eccezione dichiarata e' la **lega di prova**: dati sintetici, serve
+all'onboarding, e chiedere 4,99 € prima di far vedere il prodotto e' il modo
+piu' sicuro di perdere chi si e' appena iscritto. Il suo costo pero' e' reale —
+tre edizioni con una chiave vera — e oggi nulla impedisce di ripeterla in
+continuazione: e' un'esposizione da chiudere con un tetto per account prima di
+aprire le iscrizioni.
+
+### La firma del webhook e' tutto
+
+E' l'unica cosa che separa «hanno pagato» da «qualcuno ha fatto una POST». Senza,
+chiunque conosca l'indirizzo attiva le leghe che vuole — non una fuga di dati:
+il prodotto regalato.
+
+E' un HMAC-SHA256 su `timestamp.corpo`, scritto in casa in quindici righe invece
+di importare l'SDK: la parte che tocca input non fidato e' la parte che si vuole
+piccola e leggibile per intero, come il lettore xlsx. Tre dettagli che non sono
+dettagli:
+
+- **Si legge il corpo GREZZO**, mai il JSON gia' analizzato. La firma copre i
+  byte esatti: riserializzare un oggetto cambia spazi e ordine dei campi, e la
+  verifica fallirebbe su richieste valide.
+- **Lo scarto del timestamp si controlla in valore assoluto.** Solo «troppo
+  vecchia» lascerebbe passare una firma nel futuro, e un orologio sfasato in
+  avanti la renderebbe valida per ore dopo la scadenza.
+- **Un evento che non ci riguarda riceve 200**, non un errore. Stripe manda
+  decine di tipi; rispondere male lo fa ritentare all'infinito e alla fine
+  disattiva l'endpoint — cioe' i pagamenti veri smettono di arrivare. Lo stesso
+  vale per la riconsegna dello stesso evento, che e' la garanzia «almeno una
+  volta» di Stripe e non un guasto: l'idempotenza e' sull'id dell'evento, e su
+  Postgres sta nella `WHERE`, non in un «leggi, decidi, scrivi» che lascerebbe
+  aperta la finestra fra due riconsegne simultanee.
+
+Si controlla anche l'**importo**. Non e' una difesa contro un attaccante —
+senza la nostra chiave nessuno crea sessioni — e' una difesa contro noi stessi:
+un prezzo cambiato in un posto e non nell'altro attiverebbe leghe per l'importo
+sbagliato senza che nessuno se ne accorga.
+
+### Verificato contro uno Stripe finto
+
+Da qui `api.stripe.com` non e' raggiungibile, e un pagamento verificabile solo
+in produzione e' un pagamento non verificato. L'indirizzo di Stripe e'
+configurabile, quindi la catena intera — sessione, redirect, webhook firmato,
+attivazione — gira sopra HTTP vero contro un finto che firma con lo stesso HMAC.
+**La firma non viene mai disattivata**: disattivarla significherebbe verificare
+qualcos'altro. Si prova che senza firma, con una firma altrui, col corpo
+manomesso di un carattere e con una firma vecchia di un'ora non succede niente.
+
 ## Cosa manca
 
 Per andare in produzione servono, nell'ordine:
 
-1. **Il pagamento**: Stripe, 4,99 euro una tantum per lega per stagione.
-   L'entitlement va sulla lega, non sull'account: chi paga per una lega non
-   paga per tutte. Da qui `api.stripe.com` non e' raggiungibile, quindi si
-   verifichera' contro un finto Stripe con firma del webhook vera.
+1. **Le chiavi vere di Stripe** e l'endpoint del webhook registrato sulla
+   dashboard. Il codice c'e' ed e' verificato contro un finto; quel che manca
+   e' configurazione. Insieme, un **tetto alle leghe di prova** per account:
+   oggi la vetrina si puo' ripetere senza limiti e costa token veri.
 2. **Una chiave per un fornitore del piano globale.** La catena HTTP c'e' ed e'
    verificata end-to-end; manca un profilo puntato su un servizio reale, che e'
    configurazione, non codice. Da fare con `ispeziona-fonte.ts` e una chiave.

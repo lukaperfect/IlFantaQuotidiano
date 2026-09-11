@@ -3,8 +3,11 @@ import { notFound } from 'next/navigation';
 import { store } from '@/lib/store';
 import { requireAccount } from '@/lib/session';
 import { edizioneLeggibile } from '@fantacomics/pipeline';
+import { stagioneDi } from '@fantacomics/ingest';
+import { prezzoLeggibile } from '@fantacomics/billing';
 import {
   rigeneraLink, generaChiaveEstensione, revocaChiaveEstensione, approvaEdizione, generaVigilia,
+  pagaLega,
 } from '@/app/actions';
 import { ConfigForm } from './config-form';
 
@@ -21,6 +24,8 @@ export default async function Lega({ params }: { params: Promise<{ id: string }>
 
   // Le rose bastano a fare un numero di vigilia: se ci sono, si offre.
   const rose = await store.getRoster(id);
+  const stagione = stagioneDi(new Date());
+  const attiva = await store.getEntitlement(id, stagione);
   const refs = await store.listEditions(id);
   const editions = await Promise.all(
     refs.map(async ({ matchday: n, kind }) => {
@@ -46,14 +51,49 @@ export default async function Lega({ params }: { params: Promise<{ id: string }>
         <h1>{config.leagueName}</h1>
       </header>
 
-      {rose ? (
-        <form action={generaVigilia} className="row">
-          <input type="hidden" name="leagueId" value={config.leagueId} />
-          <button className="btn" type="submit">
-            Fai uscire il numero di vigilia (giornata {(config.lastMatchday ?? 0) + 1})
-          </button>
-        </form>
-      ) : null}
+      <h2>Stagione {stagione}</h2>
+      {attiva ? (
+        <>
+          <p className="muted small">
+            Lega attiva. Il giornale esce due volte a settimana: la mattina in cui
+            si comincia a giocare e la mattina dopo l&rsquo;ultima partita.
+          </p>
+          {rose ? (
+            <form action={generaVigilia} className="row">
+              <input type="hidden" name="leagueId" value={config.leagueId} />
+              <button className="btn" type="submit">
+                Fai uscire il numero di vigilia (giornata {(config.lastMatchday ?? 0) + 1})
+              </button>
+            </form>
+          ) : (
+            <p className="muted small">
+              Carica il file delle rose per far uscire il primo numero.
+            </p>
+          )}
+        </>
+      ) : (
+        <>
+          {/* Si mostra cosa e' gia' entrato PRIMA di chiedere i soldi: chi ha
+              appena caricato il file vuole sapere che e' stato letto bene. */}
+          {rose ? (
+            <p className="muted small">
+              Rose caricate: {rose.teams.length} squadre,{' '}
+              {rose.teams.reduce((n, t) => n + t.players.length, 0)} giocatori.
+            </p>
+          ) : null}
+          <p className="muted small">
+            Questa lega non e&rsquo; ancora attiva per la stagione {stagione}. Si paga
+            una volta sola, {prezzoLeggibile()} per lega: da quel momento il giornale
+            esce due volte a settimana fino a fine stagione.
+          </p>
+          <form action={pagaLega} className="row">
+            <input type="hidden" name="leagueId" value={config.leagueId} />
+            <button className="btn btn--primary" type="submit">
+              Attiva la lega — {prezzoLeggibile()}
+            </button>
+          </form>
+        </>
+      )}
 
       <h2>Edizioni</h2>
       {editions.length === 0 ? (

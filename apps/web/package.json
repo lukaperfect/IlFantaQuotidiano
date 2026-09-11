@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@fantacomics/auth": "workspace:*",
+    "@fantacomics/billing": "workspace:*",
     "@fantacomics/core": "workspace:*",
     "@fantacomics/editorial": "workspace:*",
     "@fantacomics/facts": "workspace:*",

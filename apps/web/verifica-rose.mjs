@@ -162,8 +162,43 @@ ok('ricaricare lo stesso file sostituisce invece di accumulare',
  * giornale all'indirizzo pubblico, quello che finira' nel gruppo.
  */
 await page.goto(`${base}/lega/${idLega}`, { waitUntil: 'domcontentloaded' });
+
+/**
+ * PRIMA DEL PAGAMENTO NON SI PUBBLICA NIENTE, e si vede in pagina.
+ *
+ * La pagina mostra pero' cosa e' gia' entrato — squadre e giocatori letti dal
+ * file — prima di chiedere i soldi: chi ha appena caricato vuole sapere che il
+ * suo foglio e' stato capito.
+ */
+ok('prima del pagamento la vigilia non si puo\' far uscire',
+   await page.locator('button:has-text("numero di vigilia")').count() === 0);
+ok('e la pagina chiede di attivare la lega, dicendo il prezzo',
+   await page.locator('button:has-text("Attiva la lega")').count() === 1,
+   (await page.locator('button:has-text("Attiva la lega")').textContent())?.trim() ?? '');
+ok('mostrando intanto che il file e\' stato letto',
+   /\d+ squadre/.test(await page.locator('main').innerText()));
+
+/**
+ * Si attiva la lega dallo store invece di guidare il pagamento nel browser: la
+ * catena Stripe — sessione, firma, webhook, idempotenza — ha la sua verifica
+ * dedicata, e ripeterla qui significherebbe avere due posti da aggiornare
+ * quando cambia. Qui interessa cio' che il pagamento SBLOCCA.
+ */
+const { stagioneDi } = await import('../../packages/ingest/src/index.ts');
+const { PREZZO_CENTESIMI, VALUTA } = await import('../../packages/billing/src/index.ts');
+await store.saveEntitlement({
+  leagueId: idLega,
+  season: stagioneDi(new Date()),
+  paidAt: new Date().toISOString(),
+  eventId: `evt-rose-${Date.now()}`,
+  sessionId: `cs-rose-${Date.now()}`,
+  amountCents: PREZZO_CENTESIMI,
+  currency: VALUTA,
+});
+
+await page.reload({ waitUntil: 'domcontentloaded' });
 const bottoneVigilia = page.locator('button:has-text("numero di vigilia")');
-ok('la lega offre di far uscire la vigilia', await bottoneVigilia.count() === 1);
+ok('a lega attiva la vigilia si puo\' far uscire', await bottoneVigilia.count() === 1);
 await bottoneVigilia.click();
 await page.locator('h2:has-text("Edizioni")').waitFor({ state: 'visible', timeout: 120000 });
 

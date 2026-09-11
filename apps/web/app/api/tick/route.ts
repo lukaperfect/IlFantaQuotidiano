@@ -114,6 +114,9 @@ export async function POST(req: Request): Promise<Response> {
         store,
         fonte: creaFonteGiornata({ http, store, season }),
         leghe: gruppo,
+        // La stagione decide quale diritto a pubblicare si controlla: pagare
+        // il 2025-26 non apre il 2026-27.
+        season,
         // Esplicita, non ereditata: e' la decisione che separa «giornata
         // finita» da «voti ancora in arrivo», e su questo percorso non la
         // guarda nessun umano prima della pubblicazione.

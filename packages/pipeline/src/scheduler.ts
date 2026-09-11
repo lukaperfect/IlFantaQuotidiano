@@ -85,6 +85,7 @@ export type FonteGiornata = {
 export type AzioneLega =
   | 'pubblicata'
   | 'vigilia-pubblicata'
+  | 'non-pagata'
   | 'in-revisione'
   | 'attesa-dati'
   | 'attesa-giornata'
@@ -105,6 +106,16 @@ export type TickInput = {
   fonte: FonteGiornata;
   /** Le leghe da considerare in questo tick. */
   leghe: readonly LeagueConfig[];
+  /**
+   * La stagione in corso. Decide QUALE diritto a pubblicare si controlla: il
+   * pagamento e' per lega e per stagione, e una lega pagata l'anno scorso non
+   * e' pagata quest'anno.
+   *
+   * Esplicita e non dedotta dall'orologio qui dentro: e' la condizione che
+   * separa chi riceve il giornale da chi no, e una funzione che se la calcola
+   * da sola non si puo' provare su una stagione diversa da oggi.
+   */
+  season: string;
   now?: Date;
   window?: DeliveryWindow;
   /** Quando escono i due numeri: fuso e ora della mattina. */
@@ -190,6 +201,25 @@ export async function tickConsegne(input: TickInput): Promise<TickOutput> {
       // ripubblica a ogni passata è peggio di un cron che non parte.
       if (await input.store.getEdition(config.leagueId, matchday)) {
         esiti.push({ ...base, azione: 'pubblicata', motivo: 'Edizione già presente: niente da fare.' });
+        continue;
+      }
+
+      /**
+       * SENZA PAGAMENTO NON SI PUBBLICA, e il controllo sta PRIMA di tutto il
+       * resto.
+       *
+       * Non e' pignoleria sull'ordine: dopo questo punto si interroga un
+       * servizio a consumo e si fa girare un modello a pagamento. Un cancello
+       * messo alla fine avrebbe lasciato che una lega non pagata costasse
+       * esattamente quanto una pagata, con l'unica differenza che il giornale
+       * non si vede. Il costo va speso solo per chi ha pagato.
+       */
+      const diritto = await input.store.getEntitlement(config.leagueId, input.season);
+      if (!diritto) {
+        esiti.push({
+          ...base, azione: 'non-pagata',
+          motivo: `Lega non attiva per la stagione ${input.season}: nessun giornale.`,
+        });
         continue;
       }
 
@@ -397,6 +427,7 @@ export function riassumiTick(out: TickOutput): string {
     `${out.esiti.length} leghe in ${out.durataMs}ms, ${out.lettureGlobali} letture della giornata globale`,
     `pubblicate ${per('pubblicata')} (di cui ${per('vigilia-pubblicata')} vigilie), `
     + `in revisione ${per('in-revisione')}, errori ${per('errore')}`,
-    `in attesa: ${per('attesa-giornata')} giornata, ${per('attesa-finestra')} finestra, ${per('attesa-dati')} dati`,
+    `in attesa: ${per('attesa-giornata')} giornata, ${per('attesa-finestra')} finestra, `
+    + `${per('attesa-dati')} dati, ${per('non-pagata')} non attive`,
   ].join(' · ');
 }

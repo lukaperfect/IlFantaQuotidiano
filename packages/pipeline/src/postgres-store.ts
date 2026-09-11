@@ -11,7 +11,9 @@ import { emptyMemory, type EditorialMemory } from '@fantacomics/editorial';
 import type { HistoricalMatchday, LeagueHistory, RarityCorpus } from '@fantacomics/facts';
 import type { Observation } from '@fantacomics/ingest';
 import { tipoEdizione } from './store.js';
-import type { EditionRef, LeagueConfig, LeagueStore, PublishedEdition } from './store.js';
+import type {
+  EditionRef, Entitlement, LeagueConfig, LeagueStore, PublishedEdition,
+} from './store.js';
 
 /**
  * Implementazione su Postgres delle stesse interfacce servite dai file store.
@@ -272,6 +274,59 @@ export class PostgresLeagueStore implements LeagueStore {
       'update editions set approved_at = $3 '
       + 'where league_id = $1 and matchday = $2 and kind = $4',
       [leagueId, matchday, at, kind],
+    );
+    return (rowCount ?? 0) === 1;
+  }
+
+  async esisteLega(leagueId: string): Promise<boolean> {
+    const { rows } = await this.pool.query(
+      'select 1 from leagues where league_id = $1', [leagueId],
+    );
+    return rows.length > 0;
+  }
+
+  async getEntitlement(leagueId: string, season: string): Promise<Entitlement | null> {
+    const { rows } = await this.pool.query(
+      'select league_id, season, paid_at, event_id, session_id, amount_cents, currency '
+      + 'from league_entitlements where league_id = $1 and season = $2',
+      [leagueId, season],
+    );
+    const row = rows[0];
+    if (!row) return null;
+    return {
+      leagueId: String(row.league_id),
+      season: String(row.season),
+      paidAt: (row.paid_at as Date).toISOString(),
+      eventId: String(row.event_id),
+      sessionId: String(row.session_id),
+      amountCents: Number(row.amount_cents),
+      currency: String(row.currency),
+    };
+  }
+
+  async saveEntitlement(e: Entitlement): Promise<boolean> {
+    /**
+     * L'idempotenza sta nella WHERE, non in un controllo applicativo.
+     *
+     * Stripe consegna lo stesso evento piu' volte, e due riconsegne possono
+     * arrivare insieme: un «leggi, decidi, scrivi» in tre passi lascia la
+     * finestra in cui entrambe decidono di scrivere. `where ... event_id is
+     * distinct from` la chiude dentro il database, che e' l'unico posto dove
+     * si puo' chiudere davvero — ed e' la stessa ragione per cui il consumo di
+     * un magic link sta in una WHERE e non in un `if`.
+     */
+    const { rowCount } = await this.pool.query(
+      `insert into league_entitlements
+         (league_id, season, paid_at, event_id, session_id, amount_cents, currency)
+       values ($1,$2,$3,$4,$5,$6,$7)
+       on conflict (league_id, season) do update set
+         paid_at = excluded.paid_at,
+         event_id = excluded.event_id,
+         session_id = excluded.session_id,
+         amount_cents = excluded.amount_cents,
+         currency = excluded.currency
+       where league_entitlements.event_id is distinct from excluded.event_id`,
+      [e.leagueId, e.season, e.paidAt, e.eventId, e.sessionId, e.amountCents, e.currency],
     );
     return (rowCount ?? 0) === 1;
   }

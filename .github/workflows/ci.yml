@@ -137,6 +137,12 @@ jobs:
       # prima che il servizio esista.
       FANTACOMICS_CRON_SECRET: segreto-del-cron-della-ci-abbastanza-lungo
       FANTACOMICS_FONTE_URL: http://127.0.0.1:4174
+      # Lo Stripe finto della verifica del pagamento. La chiave e il segreto
+      # sono di prova e non valgono niente: servono solo perche' l'app si
+      # rifiuta — giustamente — di aprire l'endpoint senza un segreto.
+      STRIPE_SECRET_KEY: sk_test_finta_della_ci
+      STRIPE_WEBHOOK_SECRET: whsec_segreto_del_webhook_della_ci_lungo
+      STRIPE_API_BASE: http://127.0.0.1:4175
       # NIENTE `NODE_ENV: production` a livello di job: farebbe installare a
       # pnpm le sole dipendenze di produzione, e tsx, vitest e playwright
       # sparirebbero prima ancora di arrivare al primo passo che li usa.
@@ -192,6 +198,17 @@ jobs:
         # poche ore» il cron deve produrre una VIGILIA, senza far avanzare il
         # puntatore delle giornate; con la giornata finita, il retrospettivo.
         run: pnpm exec tsx apps/worker/src/scripts/verifica-fonte.ts
+
+      - name: La catena del pagamento, contro uno Stripe finto
+        # E' il percorso che decide se il prodotto incassa o viene regalato, e
+        # da qui api.stripe.com non e' raggiungibile: senza un finto sarebbe
+        # verificabile solo in produzione, cioe' non verificato.
+        #
+        # La firma del webhook non viene MAI disattivata: l'evento e' firmato
+        # con lo stesso HMAC che usa Stripe, e si prova che senza firma, con
+        # una firma altrui, col corpo manomesso e con una firma vecchia non
+        # succede niente.
+        run: pnpm exec tsx apps/worker/src/scripts/verifica-pagamento.ts
 
       - name: Rose dal foglio della piattaforma, e primo numero
         # Il file vero sta nel repository come fixture (lo ha autorizzato il

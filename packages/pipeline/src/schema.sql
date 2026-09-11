@@ -76,6 +76,25 @@ alter table editions add primary key (league_id, matchday, kind);
 -- uno schema.
 alter table editions add column if not exists approved_at timestamptz;
 
+-- IL DIRITTO A PUBBLICARE, per lega e per stagione.
+--
+-- Sta sulla lega e non sull'account: si paga l'iscrizione a UNA lega, e chi ne
+-- amministra due ne paga due. Una tabella e non una colonna su `leagues`
+-- perche' le stagioni si accumulano: il pagamento del 2025-26 resta a
+-- archivio anche dopo che si e' pagato il 2026-27.
+create table if not exists league_entitlements (
+  league_id     text not null,
+  season        text not null,
+  paid_at       timestamptz not null,
+  -- L'evento di Stripe: e' la chiave dell'idempotenza. Stripe consegna lo
+  -- stesso evento piu' volte, ed e' la sua garanzia, non un guasto.
+  event_id      text not null,
+  session_id    text not null,
+  amount_cents  integer not null,
+  currency      text not null,
+  primary key (league_id, season)
+);
+
 create table if not exists league_state (
   league_id  text primary key,
   memory     jsonb not null,

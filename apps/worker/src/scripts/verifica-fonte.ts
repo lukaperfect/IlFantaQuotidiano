@@ -26,6 +26,7 @@ import {
   generateWorld, withOfficialScores, payloadPortaleDiProva, stagioneDi,
 } from '@fantacomics/ingest';
 import { randomToken } from '@fantacomics/auth';
+import { PREZZO_CENTESIMI, VALUTA } from '@fantacomics/billing';
 
 const base = process.env.FANTACOMICS_URL ?? 'http://localhost:3000';
 const segreto = process.env.FANTACOMICS_CRON_SECRET ?? '';
@@ -47,6 +48,19 @@ function ok(nome: string, cond: boolean, extra = ''): void {
 /* ------------------------------------------------------------------ */
 
 const stagione = stagioneDi(new Date());
+
+/** Dichiara pagata una lega per questa stagione. */
+async function attiva(leagueId: string): Promise<void> {
+  await store.saveEntitlement({
+    leagueId,
+    season: stagione,
+    paidAt: new Date().toISOString(),
+    eventId: `evt-verifica-${leagueId}`,
+    sessionId: `cs-verifica-${leagueId}`,
+    amountCents: PREZZO_CENTESIMI,
+    currency: VALUTA,
+  });
+}
 
 /**
  * UNA GIORNATA ANCORA VERGINE, scelta guardando l'archivio.
@@ -261,6 +275,10 @@ async function main(): Promise<void> {
       lastMatchday: GIORNATA - 1,
       fonte: { profilo: 'servizio-di-prova', leagueExternalId: l.esterno },
     });
+    // Senza diritto a pubblicare il pianificatore le salterebbe, ed e' giusto
+    // cosi': quello e' il percorso che verifica `verifica-pagamento.ts`. Qui si
+    // verifica la CONSEGNA, quindi le leghe si danno per pagate.
+    await attiva(l.leagueId);
   }
 
   // 1. Il cron e' chiuso a chi non ha il segreto.
@@ -408,6 +426,7 @@ async function main(): Promise<void> {
     fonte: { profilo: 'servizio-di-prova', leagueExternalId: `ext-vigilia-${marchio}` },
   });
   await store.saveRoster(legaVigilia, roseDiProva());
+  await attiva(legaVigilia);
 
   richieste.clear();
   const giroVigilia = await tick(segreto, true);

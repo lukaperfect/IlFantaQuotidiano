@@ -13,10 +13,11 @@ import { authStore } from '@/lib/store';
 import { requireAccount, startSession, NONCE_COOKIE } from '@/lib/session';
 import {
   importFromFiles, generateWorld, withOfficialScores, nudgeTeamToScore, AdapterError,
-  importaRoseXlsx,
+  importaRoseXlsx, stagioneDi,
 } from '@fantacomics/ingest';
 import { runMatchdayPipeline, runAnteprimaPipeline } from '@fantacomics/pipeline';
 import { TemplateDriver, AnthropicDriver } from '@fantacomics/llm';
+import { creaSessioneCheckout } from '@fantacomics/billing';
 import { store } from '@/lib/store';
 
 export type EsitoAccesso = { ok: boolean; messaggio: string; linkSviluppo?: string };
@@ -263,6 +264,24 @@ export async function creaLegaDaFile(
     lastMatchday: esistente?.lastMatchday ?? null,
   });
 
+  /**
+   * ANCHE QUESTA STRADA PASSA DAL CANCELLO.
+   *
+   * E' il terzo percorso verso la stessa spesa — far girare il modello su una
+   * lega vera — e me lo ero dimenticato: l'avevo messo sul pianificatore e
+   * sulla vigilia a mano, e da qui si sarebbe continuato a pubblicare gratis
+   * caricando cinque CSV. Un controllo applicato su due percorsi su tre vale
+   * quanto il percorso che lascia aperto.
+   *
+   * La lega resta CREATA: si torna alla sua pagina, dove c'e' il pulsante per
+   * attivarla. Non si perde niente tranne il caricamento, e chi paga vede
+   * subito a cosa serviva.
+   */
+  if (!(await store.getEntitlement(leagueId, season))) {
+    revalidatePath('/');
+    return `/lega/${leagueId}`;
+  }
+
   await runMatchdayPipeline({
     snapshot, serieA, rules: DEFAULT_RULESET, store, driver: driver(), spice,
   });
@@ -287,6 +306,21 @@ export async function creaLegaDiProva(
   const leagueName = safeName(String(form.get('leagueName') ?? 'Lega di prova'), 60);
   const teams = Math.max(4, Math.min(12, Number(form.get('teams') ?? 8)));
   const spice = Number(form.get('spice') ?? 2) as 1 | 2 | 3;
+  /**
+   * LA LEGA DI PROVA NON PASSA DAL CANCELLO, ed e' una scelta.
+   *
+   * E' l'onboarding: chiedere cinque CSV o un file di rose a chi non ha ancora
+   * visto il prodotto e' il modo piu' sicuro di perderlo, e chiedergli 4,99
+   * euro prima di mostrarglielo lo e' ancora di piu'. I dati sono SINTETICI —
+   * squadre inventate, punteggi generati — quindi non e' il prodotto regalato:
+   * e' la vetrina.
+   *
+   * Il costo pero' e' reale: tre edizioni di otto pezzi ciascuna, con una
+   * chiave vera. Oggi nessun limite impedisce di ripetere questa azione in
+   * continuazione, ed e' un'esposizione da chiudere prima di aprire le
+   * iscrizioni — un tetto per account, come quello che esiste gia' sulla
+   * richiesta dei magic link.
+   */
   const leagueId = `prova-${stableHash(`${leagueName}:${Date.now()}`)}`;
 
   await store.saveConfig({
@@ -404,6 +438,52 @@ export async function revocaChiaveEstensione(form: FormData): Promise<void> {
 }
 
 /**
+ * AVVIA IL PAGAMENTO DI UNA LEGA.
+ *
+ * Crea la sessione di Checkout e manda l'admin su Stripe. Cio' che NON fa e'
+ * altrettanto importante: non tocca nessun diritto. L'attivazione arriva dal
+ * webhook firmato, perche' solo quello prova che il pagamento e' avvenuto —
+ * un ritorno sul `success_url` prova soltanto che il browser e' passato di li',
+ * e quell'indirizzo lo puo' aprire chiunque.
+ */
+export async function pagaLega(form: FormData): Promise<void> {
+  const account = await requireAccount();
+  const leagueId = String(form.get('leagueId') ?? '');
+  const config = await store.getConfigForOwner(leagueId, account.accountId);
+  if (!config) redirect('/');
+
+  const chiave = process.env.STRIPE_SECRET_KEY ?? '';
+  if (chiave === '') {
+    throw new AdapterError(
+      'Il pagamento non e\' configurato su questo server (manca STRIPE_SECRET_KEY).',
+      'parse', false,
+    );
+  }
+
+  const base = process.env.FANTACOMICS_URL ?? 'http://localhost:3000';
+  const season = stagioneDi(new Date());
+  const sessione = await creaSessioneCheckout(
+    {
+      chiave,
+      // L'indirizzo di Stripe e' configurabile: da qui `api.stripe.com` non e'
+      // raggiungibile, e un pagamento verificabile solo in produzione e' un
+      // pagamento non verificato.
+      ...(process.env.STRIPE_API_BASE ? { baseUrl: process.env.STRIPE_API_BASE } : {}),
+    },
+    {
+      leagueId,
+      leagueName: config.leagueName,
+      season,
+      successUrl: `${base}/lega/${leagueId}?pagamento=ok`,
+      cancelUrl: `${base}/lega/${leagueId}?pagamento=annullato`,
+      ...(account.email ? { email: account.email } : {}),
+    },
+  );
+
+  redirect(sessione.url);
+}
+
+/**
  * FA USCIRE IL NUMERO DI VIGILIA.
  *
  * Basta il file delle rose: non serve nessuna giornata giocata, nessun voto e
@@ -420,6 +500,17 @@ export async function generaVigilia(form: FormData): Promise<void> {
   const leagueId = String(form.get('leagueId') ?? '');
   const config = await store.getConfigForOwner(leagueId, account.accountId);
   if (!config) redirect('/');
+
+  /**
+   * Senza pagamento non esce niente, nemmeno a mano.
+   *
+   * Il cancello sta anche qui e non solo nel pianificatore perche' questo e' un
+   * secondo percorso verso la stessa spesa: far girare il modello. Un controllo
+   * applicato su uno dei due percorsi vale quanto il percorso che lascia
+   * aperto.
+   */
+  const season = stagioneDi(new Date());
+  if (!(await store.getEntitlement(leagueId, season))) redirect(`/lega/${leagueId}`);
 
   const roster = await store.getRoster(leagueId);
   // Senza rose non c'e' materia: si torna indietro senza fingere di aver fatto.

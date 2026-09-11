@@ -76,6 +76,28 @@ export type LeagueConfig = {
  * pack. Senza pack il giornale non si può ricostruire, e un archivio che non
  * si rilegge non è un archivio.
  */
+/**
+ * IL DIRITTO A PUBBLICARE, per una lega e una stagione.
+ *
+ * Sta sulla LEGA e non sull'account: si paga l'iscrizione a una lega, e chi ne
+ * amministra due ne paga due. Metterlo sull'account avrebbe significato che il
+ * primo pagamento apre tutte le leghe presenti e future dello stesso
+ * proprietario — cioe' un prodotto gratis per chiunque abbia un amico che paga.
+ *
+ * E' per STAGIONE perche' il prodotto vive da settembre a maggio: un addebito
+ * ricorrente su un prodotto stagionale e' una disdetta annunciata.
+ */
+export type Entitlement = {
+  leagueId: string;
+  season: string;
+  paidAt: string;
+  /** L'evento di Stripe che l'ha creato: e' la chiave dell'idempotenza. */
+  eventId: string;
+  sessionId: string;
+  amountCents: number;
+  currency: string;
+};
+
 /** L'indirizzo di un'edizione dentro una lega. */
 export type EditionRef = {
   matchday: number;
@@ -185,6 +207,23 @@ export interface LeagueStore {
    * impostata, quindi non e' nemmeno un elenco completo.
    */
   legheDaConsegnare(): Promise<LeagueConfig[]>;
+  /**
+   * ESISTE questa lega? Solo un si' o un no.
+   *
+   * Seconda e ultima deroga alla regola «nessuna lettura senza proprietario»,
+   * e vale la stessa distinzione: chi chiede e' il sistema, non un utente. Lo
+   * usa il webhook dei pagamenti, che arriva con un evento FIRMATO da Stripe
+   * in cui la lega e' gia' nominata — non sta cercando quali leghe esistono,
+   * sta controllando che quella per cui e' appena arrivato un pagamento non
+   * sia sparita nel frattempo.
+   *
+   * Restituisce un booleano e non la configurazione, di proposito: cosi' non
+   * puo' diventare per sbaglio il modo in cui una pagina legge una lega
+   * altrui. E serve: un pagamento per una lega inesistente e' un rimborso da
+   * fare, e senza questo controllo resterebbe una riga orfana che nessuno
+   * guarda.
+   */
+  esisteLega(leagueId: string): Promise<boolean>;
   getConfigBySlug(publicSlug: string): Promise<LeagueConfig | null>;
   /**
    * Risolve la chiave dell'estensione. E' l'unico modo per cui il relay sa a
@@ -232,6 +271,18 @@ export interface LeagueStore {
    */
   getRoster(leagueId: string): Promise<LeagueRoster | null>;
   saveRoster(leagueId: string, roster: LeagueRoster): Promise<void>;
+  /** Il diritto a pubblicare per quella lega in quella stagione, se c'e'. */
+  getEntitlement(leagueId: string, season: string): Promise<Entitlement | null>;
+  /**
+   * Registra un pagamento. Dice se l'ha registrato QUESTA chiamata.
+   *
+   * Stripe consegna lo stesso evento piu' volte — e' la sua garanzia «at least
+   * once», non un guasto. Senza un'idempotenza esplicita ogni riconsegna
+   * riscriverebbe la riga, e un eventuale conteggio dei pagamenti direbbe
+   * numeri inventati. Il falso restituito non e' un errore: significa «gia'
+   * visto», e chi chiama deve rispondere 200 lo stesso.
+   */
+  saveEntitlement(entitlement: Entitlement): Promise<boolean>;
   /**
    * Le osservazioni della giornata GLOBALE di Serie A.
    *
@@ -482,6 +533,29 @@ export class FileLeagueStore implements LeagueStore {
     await this.writeJson(this.path('rose', `${leagueId}.json`), LeagueRosterSchema.parse(roster));
   }
 
+  async esisteLega(leagueId: string): Promise<boolean> {
+    return (await this.readConfig(leagueId)) !== null;
+  }
+
+  async getEntitlement(leagueId: string, season: string): Promise<Entitlement | null> {
+    if (!SEGMENTO_VALIDO.test(leagueId) || !SEGMENTO_VALIDO.test(season)) return null;
+    return this.readJson<Entitlement | null>(
+      this.path('diritti', `${leagueId}--${season}.json`), null,
+    );
+  }
+
+  async saveEntitlement(entitlement: Entitlement): Promise<boolean> {
+    const { leagueId, season } = entitlement;
+    if (!SEGMENTO_VALIDO.test(leagueId) || !SEGMENTO_VALIDO.test(season)) return false;
+    const gia = await this.getEntitlement(leagueId, season);
+    // Stesso evento gia' registrato: e' una riconsegna di Stripe, non un
+    // secondo pagamento. Si risponde «no, non l'ho fatto io» senza toccare
+    // niente, e chi chiama risponde 200 lo stesso.
+    if (gia && gia.eventId === entitlement.eventId) return false;
+    await this.writeJson(this.path('diritti', `${leagueId}--${season}.json`), entitlement);
+    return true;
+  }
+
   /**
    * Si conservano le ultime osservazioni, non tutte: alla macchina a stati
    * servono le ultime due o tre, e un file che cresce a ogni passata del cron
@@ -520,6 +594,7 @@ export class InMemoryLeagueStore implements LeagueStore {
   private readonly editions = new Map<string, PublishedEdition>();
   private readonly configs = new Map<string, LeagueConfig>();
   private readonly rose = new Map<string, LeagueRoster>();
+  private readonly diritti = new Map<string, Entitlement>();
   private readonly osservazioni = new Map<string, Observation[]>();
   private corpus: number[] = [];
 
@@ -564,6 +639,22 @@ export class InMemoryLeagueStore implements LeagueStore {
   }
   async saveRoster(leagueId: string, roster: LeagueRoster): Promise<void> {
     this.rose.set(leagueId, LeagueRosterSchema.parse(roster));
+  }
+
+  async esisteLega(leagueId: string): Promise<boolean> {
+    return this.configs.has(leagueId);
+  }
+
+  async getEntitlement(leagueId: string, season: string): Promise<Entitlement | null> {
+    return this.diritti.get(`${leagueId}:${season}`) ?? null;
+  }
+
+  async saveEntitlement(entitlement: Entitlement): Promise<boolean> {
+    const chiave = `${entitlement.leagueId}:${entitlement.season}`;
+    const gia = this.diritti.get(chiave);
+    if (gia && gia.eventId === entitlement.eventId) return false;
+    this.diritti.set(chiave, entitlement);
+    return true;
   }
 
   async getOsservazioni(season: string, matchday: number): Promise<Observation[]> {

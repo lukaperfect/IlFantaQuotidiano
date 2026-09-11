@@ -7,7 +7,9 @@ import { DEFAULT_RULESET } from '@fantacomics/core';
 import {
   issueMagicLink, consumeMagicLink, peekMagicLink, hashToken, type AuthStore,
 } from '@fantacomics/auth';
-import { FileLeagueStore, edizioneLeggibile, type LeagueStore } from './store.js';
+import {
+  FileLeagueStore, InMemoryLeagueStore, edizioneLeggibile, type LeagueStore,
+} from './store.js';
 import { FileAuthStore } from './auth-store.js';
 import { PostgresLeagueStore, PostgresAuthStore, migrate } from './postgres-store.js';
 
@@ -31,6 +33,32 @@ const implementazioni: { nome: string; salta: boolean; crea: () => Promise<Ambie
       const root = await mkdtemp(join(tmpdir(), 'fc-store-'));
       return {
         league: new FileLeagueStore(root),
+        auth: new FileAuthStore(root),
+        cleanup: () => rm(root, { recursive: true, force: true }),
+      };
+    },
+  },
+  {
+    /**
+     * LO STORE IN MEMORIA ENTRA NEL CONTRATTO.
+     *
+     * Non e' un giocattolo: lo usano il pianificatore, la pipeline e ogni
+     * verifica in processo, cioe' e' l'implementazione su cui gira la maggior
+     * parte dei test del progetto. Restava fuori dal contratto, e si vedeva:
+     * la mutazione «togli l'idempotenza dell'evento di pagamento» non veniva
+     * colta da nessuno, perche' il ramo che la implementa qui dentro non era
+     * verificato da niente.
+     *
+     * L'autenticazione resta su file — in memoria non esiste — e va bene: le
+     * asserzioni che contano per questa implementazione sono quelle della
+     * LEGA, ed e' quelle che si vogliono far girare anche qui.
+     */
+    nome: 'InMemoryStore',
+    salta: false,
+    crea: async () => {
+      const root = await mkdtemp(join(tmpdir(), 'fc-mem-'));
+      return {
+        league: new InMemoryLeagueStore(),
         auth: new FileAuthStore(root),
         cleanup: () => rm(root, { recursive: true, force: true }),
       };
@@ -369,6 +397,56 @@ for (const impl of implementazioni) {
 
       expect(await env.league.getEdition('lega-1', 7, 'giornale')).not.toBeNull();
       expect(await env.league.listEditions('lega-1')).toEqual([{ matchday: 7, kind: 'giornale' }]);
+    });
+
+    it('registra il diritto a pubblicare, per lega e per stagione', async () => {
+      const diritto = {
+        leagueId: 'lega-1', season: '2025-26', paidAt: '2026-01-06T08:00:00.000Z',
+        eventId: 'evt_1', sessionId: 'cs_1', amountCents: 499, currency: 'eur',
+      };
+      expect(await env.league.getEntitlement('lega-1', '2025-26')).toBeNull();
+      expect(await env.league.saveEntitlement(diritto)).toBe(true);
+      expect(await env.league.getEntitlement('lega-1', '2025-26')).toEqual(diritto);
+
+      // E' PER STAGIONE: pagare il 2025-26 non apre il 2026-27.
+      expect(await env.league.getEntitlement('lega-1', '2026-27')).toBeNull();
+      // Ed e' PER LEGA: chi ne amministra due ne paga due.
+      expect(await env.league.getEntitlement('lega-2', '2025-26')).toBeNull();
+    });
+
+    it('lo stesso evento consegnato due volte non registra due pagamenti', async () => {
+      /**
+       * Stripe consegna «almeno una volta»: le riconsegne sono la sua garanzia,
+       * non un guasto. Il falso non e' un errore — significa «gia' visto» — e
+       * chi chiama deve rispondere 200 lo stesso, altrimenti Stripe ritenta
+       * all'infinito e alla fine disattiva l'endpoint.
+       */
+      const diritto = {
+        leagueId: 'lega-1', season: '2025-26', paidAt: '2026-01-06T08:00:00.000Z',
+        eventId: 'evt_1', sessionId: 'cs_1', amountCents: 499, currency: 'eur',
+      };
+      expect(await env.league.saveEntitlement(diritto)).toBe(true);
+      expect(await env.league.saveEntitlement(diritto)).toBe(false);
+      expect(await env.league.saveEntitlement({ ...diritto, paidAt: '2026-02-01T00:00:00.000Z' }))
+        .toBe(false);
+      // La riga resta quella del primo pagamento: una riconsegna non riscrive.
+      expect((await env.league.getEntitlement('lega-1', '2025-26'))?.paidAt)
+        .toBe('2026-01-06T08:00:00.000Z');
+    });
+
+    it('un evento DIVERSO sulla stessa lega e stagione invece aggiorna', async () => {
+      // E' il caso di un rimborso seguito da un nuovo pagamento: la riga deve
+      // poter cambiare, altrimenti chi ripaga resta bloccato per sempre.
+      const primo = {
+        leagueId: 'lega-1', season: '2025-26', paidAt: '2026-01-06T08:00:00.000Z',
+        eventId: 'evt_1', sessionId: 'cs_1', amountCents: 499, currency: 'eur',
+      };
+      await env.league.saveEntitlement(primo);
+      expect(await env.league.saveEntitlement({
+        ...primo, eventId: 'evt_2', sessionId: 'cs_2', paidAt: '2026-03-01T00:00:00.000Z',
+      })).toBe(true);
+      const letto = await env.league.getEntitlement('lega-1', '2025-26');
+      expect(letto?.eventId).toBe('evt_2');
     });
 
     it('un’edizione sotto soglia non e’ leggibile finche’ nessuno la approva', async () => {

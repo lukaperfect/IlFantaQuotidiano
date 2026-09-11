@@ -77,7 +77,21 @@ ok('pagina lega protetta senza sessione', anon.page.url().includes('/accedi'));
 
 // 2. Accesso di Mario e creazione lega
 const mario = await nuovaSessione();
-const linkUsato = await accedi(mario.page, 'mario@example.com');
+/**
+ * Indirizzi diversi a ogni esecuzione.
+ *
+ * Con indirizzi fissi il secondo giro trova l'account del primo, e con lui le
+ * sue leghe: «Lega da File» ha lo stesso id — deriva da account, nome e
+ * stagione — quindi si ritrovano le edizioni del giro precedente e
+ * un'asserzione sul «non deve pubblicare» passa o fallisce a seconda di cosa
+ * c'e' in archivio. C'e' anche il limite di frequenza sulla richiesta del
+ * magic link, che alla seconda esecuzione non manderebbe nessuna mail.
+ *
+ * In CI il database nasce con la verifica e non si vedrebbe mai: e' il genere
+ * di dipendenza dallo stato che si scopre solo girando due volte di fila.
+ */
+const giro = Date.now().toString(36);
+const linkUsato = await accedi(mario.page, `mario-${giro}@example.com`);
 ok('accesso via magic link', mario.page.url() === `${base}/`, mario.page.url());
 
 // 3. Il magic link e' monouso
@@ -96,7 +110,7 @@ await riuso.ctx.close();
  * certificato e interfaccia sono quelli veri.
  */
 const chiedente = await nuovaSessione();
-const linkGirato = await chiediLink(chiedente.page, 'chiara@example.com');
+const linkGirato = await chiediLink(chiedente.page, `chiara-${giro}@example.com`);
 
 const altroDispositivo = await nuovaSessione();
 await altroDispositivo.page.goto(linkGirato, { waitUntil: 'domcontentloaded' });
@@ -104,7 +118,7 @@ ok('link aperto altrove non entra ma chiede conferma',
    altroDispositivo.page.url().endsWith('/conferma'), altroDispositivo.page.url());
 ok('la conferma dice in quale account si sta entrando',
    (await altroDispositivo.page.locator('.account-conferma').innerText()).trim()
-     === 'chiara@example.com');
+     === `chiara-${giro}@example.com`);
 
 // E finche' non si conferma, nessuna sessione: la home resta chiusa.
 await altroDispositivo.page.goto(`${base}/`, { waitUntil: 'domcontentloaded' });
@@ -173,7 +187,7 @@ ok('robots.txt vieta l’API', /Disallow:[^\n]*\/api\//.test(testoRobots));
 
 // 5. Un altro account non vede la lega di Mario
 const giulia = await nuovaSessione();
-await accedi(giulia.page, 'giulia@example.com');
+await accedi(giulia.page, `giulia-${giro}@example.com`);
 const legheGiulia = await giulia.page.locator('.card-list li').count();
 ok('Giulia non vede leghe di Mario', legheGiulia === 0, `${legheGiulia} leghe visibili`);
 const resp = await giulia.page.goto(`${base}/lega/${legaId}`, { waitUntil: 'domcontentloaded' });
@@ -228,9 +242,18 @@ for (const [nome, testo] of Object.entries(modelli)) {
 }
 await formFile.locator('button:has-text("Importa e genera")').click();
 await mario.page.waitForSelector('h2:has-text("Edizioni")', { timeout: 120000 });
-const pezziDaFile = await mario.page.locator('.card-list li').count();
-ok('una lega nata dai soli modelli produce un giornale', pezziDaFile >= 1,
-   `${pezziDaFile} edizioni`);
+
+/**
+ * LA LEGA NASCE, MA IL GIORNALE NO: manca il pagamento.
+ *
+ * E' il terzo percorso verso la stessa spesa, e senza cancello si sarebbe
+ * continuato a pubblicare gratis caricando cinque CSV. La lega resta creata —
+ * non si perde niente tranne il caricamento — e la pagina chiede di attivarla.
+ */
+ok('una lega da CSV nasce ma NON pubblica finche\' non e\' pagata',
+   await mario.page.locator('.card-list li').count() === 0);
+ok('e la sua pagina chiede di attivarla',
+   await mario.page.locator('button:has-text("Attiva la lega")').count() === 1);
 
 /**
  * E un file sbagliato deve DIRE cosa non andava.

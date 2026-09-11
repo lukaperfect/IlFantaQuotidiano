@@ -5,7 +5,7 @@ import {
   type CalendarioGiornata, type Observation,
 } from '@fantacomics/ingest';
 import { TemplateDriver } from '@fantacomics/llm';
-import { InMemoryLeagueStore, type LeagueConfig } from './store.js';
+import { InMemoryLeagueStore, type LeagueConfig, type LeagueStore } from './store.js';
 import { tickConsegne, prossimaGiornata, riassumiTick, type FonteGiornata } from './scheduler.js';
 
 const R = DEFAULT_RULESET;
@@ -53,15 +53,42 @@ function fonte(over: Partial<FonteGiornata> = {}): FonteGiornata {
   };
 }
 
-const tick = (over: Partial<Parameters<typeof tickConsegne>[0]> = {}) =>
-  tickConsegne({
-    store: new InMemoryLeagueStore(),
+const STAGIONE = '2025-26';
+
+/**
+ * Il diritto a pubblicare per una lega in questa stagione.
+ *
+ * L'helper qui sotto lo concede da se' a tutte le leghe del tick, perche' la
+ * stragrande maggioranza di questi test parla di PIANIFICAZIONE e non di
+ * pagamenti: farglielo preparare a ciascuno sarebbe rumore che nasconde cio'
+ * che ognuno verifica davvero. Il cancello ha il suo blocco dedicato, dove si
+ * passa `senzaDiritto`.
+ */
+async function concediDiritto(store: LeagueStore, leagueId: string): Promise<void> {
+  await store.saveEntitlement({
+    leagueId, season: STAGIONE, paidAt: '2025-09-01T08:00:00.000Z',
+    eventId: `evt-${leagueId}`, sessionId: `cs-${leagueId}`,
+    amountCents: 499, currency: 'eur',
+  });
+}
+
+const tick = async (
+  over: Partial<Parameters<typeof tickConsegne>[0]> & { senzaDiritto?: boolean } = {},
+) => {
+  const { senzaDiritto, ...resto } = over;
+  const store = resto.store ?? new InMemoryLeagueStore();
+  const leghe = resto.leghe ?? [lega()];
+  if (!senzaDiritto) for (const l of leghe) await concediDiritto(store, l.leagueId);
+  return tickConsegne({
     fonte: fonte(),
-    leghe: [lega()],
     now: MARTEDI,
     driver: new TemplateDriver(),
-    ...over,
+    season: STAGIONE,
+    ...resto,
+    store,
+    leghe,
   });
+};
 
 describe('tick di consegna', () => {
   it('pubblica una lega quando la giornata è pronta e la finestra è aperta', async () => {
@@ -251,10 +278,8 @@ describe('il costo delle richieste', () => {
 
   it('non interroga la fonte se e\'  troppo presto per riprovare', async () => {
     const fonte = fonteConStoria([parziale('2026-01-11T12:00:00.000Z')]);
-    const esito = await tickConsegne({
-      store: new InMemoryLeagueStore(),
+    const esito = await tick({
       fonte,
-      leghe: [lega()],
       now: new Date('2026-01-11T12:10:00.000Z'), // dieci minuti dopo
     });
     expect(fonte.chiamate).toBe(0);
@@ -264,10 +289,8 @@ describe('il costo delle richieste', () => {
 
   it('interroga la fonte quando l\'attesa e\' scaduta', async () => {
     const fonte = fonteConStoria([parziale('2026-01-11T12:00:00.000Z')]);
-    await tickConsegne({
-      store: new InMemoryLeagueStore(),
+    await tick({
       fonte,
-      leghe: [lega()],
       now: new Date('2026-01-11T13:30:00.000Z'), // un'ora e mezza dopo
     });
     expect(fonte.chiamate).toBe(1);
@@ -275,10 +298,8 @@ describe('il costo delle richieste', () => {
 
   it('senza niente in archivio chiede, come prima', async () => {
     const fonte = fonteConStoria([]);
-    await tickConsegne({
-      store: new InMemoryLeagueStore(),
+    await tick({
       fonte,
-      leghe: [lega()],
       now: new Date('2026-01-11T12:10:00.000Z'),
     });
     expect(fonte.chiamate).toBe(1);
@@ -291,8 +312,7 @@ describe('il costo delle richieste', () => {
       async osservazioni() { return []; },
       async materiale() { return null; },
     };
-    await tickConsegne({
-      store: new InMemoryLeagueStore(),
+    await tick({
       fonte,
       leghe: Array.from({ length: 10 }, (_, i) => lega({ leagueId: `l-${i}` })),
       now: new Date('2026-01-11T12:10:00.000Z'),
@@ -498,5 +518,119 @@ describe('le due uscite della settimana', () => {
       now: new Date('2026-10-29T08:30:00+01:00'),
     });
     expect(out.esiti[0]?.azione).toBe('pubblicata');
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * Il cancello del pagamento
+ * ------------------------------------------------------------------ */
+
+describe('senza pagamento non esce niente', () => {
+  it('una lega non attiva non riceve il giornale, e lo dice', async () => {
+    const store = new InMemoryLeagueStore();
+    const out = await tick({ store, senzaDiritto: true });
+
+    expect(out.esiti[0]?.azione).toBe('non-pagata');
+    expect(out.esiti[0]?.motivo).toContain('2025-26');
+    expect(await store.listEditions('lega-1')).toHaveLength(0);
+  });
+
+  it('e non costa NIENTE: nessuna richiesta alla fonte, nessun modello', async () => {
+    /**
+     * L'ordine del controllo e' la decisione. Un cancello messo dopo la
+     * lettura della fonte avrebbe lasciato che una lega non pagata costasse
+     * esattamente quanto una pagata — richieste al fornitore e token del
+     * modello — con l'unica differenza che il giornale non si vede.
+     */
+    let letture = 0;
+    let materiali = 0;
+    const store = new InMemoryLeagueStore();
+    await tick({
+      store,
+      senzaDiritto: true,
+      fonte: fonte({
+        osservazioni: async () => { letture++; return PRONTA; },
+        storiche: async () => { letture++; return PRONTA; },
+        materiale: async () => { materiali++; return null; },
+      }),
+    });
+    expect(letture).toBe(0);
+    expect(materiali).toBe(0);
+  });
+
+  it('nemmeno la vigilia, che pure non guarda i voti', async () => {
+    const store = new InMemoryLeagueStore();
+    await store.saveConfig(lega());
+    await store.saveRoster('lega-1', {
+      season: STAGIONE, importedAt: '2025-09-01T08:00:00.000Z', source: 'xlsx-rose',
+      teams: Array.from({ length: 4 }, (_, i) => ({
+        teamId: `t${i}`, teamName: `Squadra ${i}`,
+        players: Array.from({ length: 25 }, (_, j) => ({
+          playerId: `t${i}-p${j}`, playerName: `G ${i}-${j}`,
+          role: (['P', 'D', 'C', 'A'] as const)[j % 4] ?? 'C',
+          purchasePrice: 1 + ((i * 7 + j * 3) % 60),
+        })),
+      })),
+    });
+    const out = await tick({
+      store,
+      senzaDiritto: true,
+      fonte: fonte({
+        calendario: async () => ({
+          matchday: 1, partite: [{ kickoff: '2026-09-18T20:45:00+02:00' }],
+        }),
+      }),
+      now: new Date('2026-09-18T08:30:00+02:00'),
+    });
+    expect(out.esiti[0]?.azione).toBe('non-pagata');
+    expect(await store.listEditions('lega-1')).toHaveLength(0);
+  });
+
+  it('il diritto e\' PER STAGIONE: quello dell\'anno scorso non vale', async () => {
+    const store = new InMemoryLeagueStore();
+    await store.saveEntitlement({
+      leagueId: 'lega-1', season: '2024-25', paidAt: '2024-09-01T08:00:00.000Z',
+      eventId: 'evt-vecchio', sessionId: 'cs-vecchio', amountCents: 499, currency: 'eur',
+    });
+    const out = await tick({ store, senzaDiritto: true, season: '2025-26' });
+    expect(out.esiti[0]?.azione).toBe('non-pagata');
+  });
+
+  it('e si controlla la stagione CHIESTA, non una decisa qui dentro', async () => {
+    /**
+     * Con la stagione fissata nel codice invece che presa dall'ingresso, il
+     * test qui sopra passerebbe lo stesso: chiede 2025-26 e la costante e'
+     * 2025-26. Qui la stagione e' un'altra, quindi una costante nascosta si
+     * vede — e' la differenza fra un test che copre e uno che sembra coprire.
+     */
+    const store = new InMemoryLeagueStore();
+    await store.saveEntitlement({
+      leagueId: 'lega-1', season: '2030-31', paidAt: '2030-09-01T08:00:00.000Z',
+      eventId: 'evt-futuro', sessionId: 'cs-futuro', amountCents: 499, currency: 'eur',
+    });
+    const out = await tick({ store, senzaDiritto: true, season: '2030-31' });
+    expect(out.esiti[0]?.azione).toBe('pubblicata');
+  });
+
+  it('il diritto e\' PER LEGA: pagarne una non apre l\'altra', async () => {
+    const store = new InMemoryLeagueStore();
+    await concediDiritto(store, 'lega-1');
+    const out = await tick({
+      store, senzaDiritto: true,
+      leghe: [lega(), lega({ leagueId: 'lega-2', leagueName: 'Lega Due' })],
+    });
+    expect(out.esiti.find((e) => e.leagueId === 'lega-1')?.azione).toBe('pubblicata');
+    expect(out.esiti.find((e) => e.leagueId === 'lega-2')?.azione).toBe('non-pagata');
+  });
+
+  it('una lega non pagata non ferma le altre', async () => {
+    const store = new InMemoryLeagueStore();
+    await concediDiritto(store, 'lega-2');
+    const out = await tick({
+      store, senzaDiritto: true,
+      leghe: [lega(), lega({ leagueId: 'lega-2', leagueName: 'Lega Due' })],
+    });
+    expect(out.esiti).toHaveLength(2);
+    expect(out.esiti.find((e) => e.leagueId === 'lega-2')?.azione).toBe('pubblicata');
   });
 });
