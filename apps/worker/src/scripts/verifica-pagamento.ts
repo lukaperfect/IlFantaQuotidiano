@@ -22,7 +22,9 @@ import {
   type LeagueStore,
 } from '@fantacomics/pipeline';
 import { DEFAULT_RULESET, stableHash, type LeagueRoster } from '@fantacomics/core';
-import { FonteHttp, profiloServizioDiProva, stagioneDi } from '@fantacomics/ingest';
+import {
+  FonteHttp, profiloServizioDiProva, stagioneDi, calendarioInArrivo, attendiFinestraUtile,
+} from '@fantacomics/ingest';
 import { TemplateDriver } from '@fantacomics/llm';
 import { firmaComeStripe, PREZZO_CENTESIMI, VALUTA } from '@fantacomics/billing';
 import { randomToken } from '@fantacomics/auth';
@@ -278,6 +280,12 @@ async function main(): Promise<void> {
      (await store.getEntitlement(leagueId, '2099-00')) === null);
 
   // 7. Adesso il giornale esce.
+  //
+  // L'attesa serve nei due minuti a ridosso di un confine di finestra, dove la
+  // fessura e' troppo stretta perche' il tick ci stia dentro. Capita al massimo
+  // una volta al giorno; una verifica che cade due minuti su millequattrocento
+  // e' una verifica di cui si smette di fidarsi.
+  await attendiFinestraUtile();
   const dopo = await tickConsegne({
     store,
     season: stagione,
@@ -292,8 +300,15 @@ async function main(): Promise<void> {
       async osservazioni() { return []; },
       async storiche() { return []; },
       async calendario() {
-        const fra = (ore: number) => new Date(Date.now() + ore * 3600 * 1000).toISOString();
-        return { matchday: 1, partite: [{ kickoff: fra(2) }, { kickoff: fra(4) }] };
+        /**
+         * Qui c'era una copia di «partite fra due ore», e la copia era rotta
+         * esattamente come l'originale: la finestra della vigilia e' ancorata
+         * al giorno locale del primo fischio, quindi a tarda sera fabbricava
+         * una partita all'una di notte e il cron rispondeva «troppo presto».
+         * Ne era stata corretta una sola, e questa ha fatto cadere la CI il
+         * giro dopo con lo stesso messaggio. Adesso la regola sta in un posto.
+         */
+        return calendarioInArrivo(1);
       },
       async sfide() { return [{ homeTeamId: 't0', awayTeamId: 't1' }]; },
     },

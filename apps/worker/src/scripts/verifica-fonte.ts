@@ -24,7 +24,7 @@ import {
 import { DEFAULT_RULESET, stableHash, type LeagueRoster } from '@fantacomics/core';
 import {
   generateWorld, withOfficialScores, payloadPortaleDiProva, stagioneDi,
-  oraLocale, istanteLocale, USCITE_PREDEFINITE, decidiUscita,
+  calendarioInArrivo, attendiFinestraUtile, finestraSempreAperta,
 } from '@fantacomics/ingest';
 import { randomToken } from '@fantacomics/auth';
 import { PREZZO_CENTESIMI, VALUTA } from '@fantacomics/billing';
@@ -132,103 +132,24 @@ let completa = false;
  * retrospettivo — il percorso che il resto di questa verifica prova da sempre.
  *
  * Gli orari si costruiscono attorno ad «adesso» perche' qui decide l'orologio
- * dell'app, e non gliene si puo' iniettare uno finto da fuori.
+ * dell'app, e non gliene si puo' iniettare uno finto da fuori. Il come sta in
+ * `calendario-prova.ts`, insieme alla misura di quanto era rotto prima.
  */
 let faseVigilia = false;
 
-const FUSO = USCITE_PREDEFINITE.timezone;
-
-/**
- * IL PRIMO FISCHIO, SCELTO PERCHE' LA FINESTRA SIA APERTA ADESSO.
- *
- * Qui c'era «fra due ore», e per venti ore su ventiquattro andava bene. Ma la
- * finestra della vigilia e' ancorata al GIORNO LOCALE del primo fischio: apre
- * alle 08:00 di quel giorno — a mezzanotte se la partita e' prima delle 08:00,
- * caso che in Serie A non esiste e che il prodotto tratta apposta in modo
- * conservativo. Eseguita alle 22:40 di Roma, «fra due ore» fabbricava una
- * partita all'una di notte del giorno dopo: finestra che apre a mezzanotte
- * DOMANI, cioe' ancora nel futuro, e il cron rispondeva giustamente «troppo
- * presto». Rossa la CI, intatto il prodotto, sbagliato il finto.
- *
- * Il primo fischio resta quindi nello STESSO giorno locale di adesso, e prima
- * delle 08:00 se adesso e' prima delle 08:00. Non e' un orario di Serie A —
- * e' l'istante piu' tardi che tiene la finestra aperta quando il cron gira a
- * tarda sera — ma qui si sta verificando il cablaggio dei due numeri, non che
- * il calendario sia verosimile.
- */
-function confineDelSegmento(adesso: Date): Date {
-  const qui = oraLocale(adesso, FUSO);
-  return qui.ora >= USCITE_PREDEFINITE.ora
-    ? istanteLocale(qui, 23, 59, FUSO)
-    : istanteLocale(qui, USCITE_PREDEFINITE.ora - 1, 59, FUSO);
-}
-
-function primoFischio(adesso: Date): Date {
-  const fraDue = new Date(adesso.getTime() + 2 * 3600 * 1000);
-  const confine = confineDelSegmento(adesso);
-  return fraDue.getTime() < confine.getTime() ? fraDue : confine;
-}
-
-/**
- * LA PROVA CHE IL FINTO REGGE A QUALUNQUE ORA.
- *
- * Sta qui, e non in un commento, perche' il difetto che l'ha resa necessaria
- * era invisibile per costruzione: il calendario finto si costruiva attorno
- * all'orologio, quindi la verifica funzionava o no a seconda dell'ora in cui
- * girava. Misurata dopo la correzione, la versione precedente lasciava la
- * finestra chiusa in 717 minuti su 4320 — una verifica rotta quattro ore al
- * giorno, che in undici mesi non era mai capitato di eseguire in quelle ore.
- *
- * Si controllano anche i due giorni del cambio d'ora: e' li' che l'aritmetica
- * sui fusi sbaglia, e sbaglia di un'ora intera.
- */
-function finestraSempreAperta(): { minuti: number; buchi: number } {
-  let minuti = 0;
-  let buchi = 0;
-  for (const giorno of ['2026-09-11', '2026-03-29', '2026-10-25']) {
-    for (let m = 0; m < 24 * 60; m++) {
-      const adesso = new Date(`${giorno}T00:00:00Z`);
-      adesso.setUTCMinutes(adesso.getUTCMinutes() + m);
-      const primo = primoFischio(adesso);
-      // I minuti a ridosso di un confine sono quelli in cui la verifica aspetta.
-      if (primo.getTime() - adesso.getTime() <= 120000) continue;
-      minuti++;
-      const calendario = {
-        matchday: 1,
-        partite: [
-          { kickoff: primo.toISOString() },
-          { kickoff: new Date(primo.getTime() + 2 * 3600 * 1000).toISOString() },
-        ],
-      };
-      if (decidiUscita(calendario, adesso).uscita !== 'vigilia') buchi++;
-    }
-  }
-  return { minuti, buchi };
-}
-
-/**
- * Due minuti prima di un confine la fessura e' troppo stretta perche' il tick
- * ci stia dentro: si aspetta che il confine passi. Succede al massimo una volta
- * al giorno e costa meno di due minuti — mentre una verifica che fallisce due
- * minuti su millequattrocentoquaranta e' una verifica di cui si smette di
- * fidarsi, che e' il modo piu' caro di risparmiare due minuti.
- */
-async function attendiFinestraUtile(): Promise<void> {
-  const adesso = new Date();
-  const confine = confineDelSegmento(adesso);
-  const margine = confine.getTime() - adesso.getTime();
-  if (margine > 120000) return;
-  const attesa = margine + 65000;
-  console.log(`(fra ${Math.round(margine / 1000)}s cambia il segmento della vigilia: aspetto)`);
-  await new Promise((ok) => setTimeout(ok, attesa));
-}
-
 function partiteDiOggi(): Record<string, unknown> {
-  const primo = primoFischio(new Date());
-  // La seconda partita serve solo a dare una coda alla giornata: la finestra
-  // della vigilia guarda la PRIMA, il retrospettivo l'ultima.
-  const secondo = new Date(primo.getTime() + 2 * 3600 * 1000);
-  return { data: { partite: [{ inizio: primo.toISOString() }, { inizio: secondo.toISOString() }] } };
+  /**
+   * Il calendario viene da `calendarioInArrivo`, che sta in un posto solo:
+   * questa stessa regola, scritta a mano in due verifiche, ne ha fatta
+   * correggere una sola e la seconda ha fatto cadere la CI il giro dopo.
+   *
+   * I nomi dei campi invece si traducono qui, e non nell'aiuto condiviso: il
+   * servizio finto parla la lingua di un servizio — `inizio`, che il profilo
+   * mappa — mentre l'aiuto parla quella del dominio. Confonderle renderebbe il
+   * finto piu' comodo e meno somigliante a un fornitore vero.
+   */
+  const calendario = calendarioInArrivo(1);
+  return { data: { partite: calendario.partite.map((p) => ({ inizio: p.kickoff })) } };
 }
 
 /** Rose minime ma valide: la vigilia non ha altra materia di cui parlare. */
