@@ -16,7 +16,7 @@ ogni voce o e' fatta, o dice esattamente che cosa manca e chi la puo' fare.
 ## 1. Il progetto su Vercel
 
 Da creare a mano dalla dashboard (Add New → Project → importa
-`lukaperfect/FantaComics`), con **Root Directory = `apps/web`**. Vercel
+`lukaperfect/IlFantaQuotidiano`), con **Root Directory = `apps/web`**. Vercel
 riconosce da solo Next.js e il workspace pnpm.
 
 Root Directory e' l'unica impostazione che conta: senza, l'installazione parte
