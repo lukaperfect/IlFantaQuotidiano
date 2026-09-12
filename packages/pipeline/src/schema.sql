@@ -49,6 +49,11 @@ alter table leagues add column if not exists relay_secret text;
 create unique index if not exists leagues_relay_secret_idx on leagues (relay_secret);
 create index if not exists leagues_owner_idx on leagues (owner_id);
 
+-- Da dove viene la lega: la vetrina o un utente. Aggiunta dopo, quindi ALTER.
+-- Non e' deducibile dal prefisso dell'identificatore: quello e' una convenzione,
+-- e un tetto che si regge su una convenzione si disattiva al primo rinominare.
+alter table leagues add column if not exists origine text;
+
 create table if not exists editions (
   league_id  text not null,
   matchday   integer not null,

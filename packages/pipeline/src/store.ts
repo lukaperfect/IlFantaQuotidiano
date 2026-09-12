@@ -53,6 +53,20 @@ export type LeagueConfig = {
   ruleset: LeagueRuleset;
   spice: 1 | 2 | 3;
   createdAt: string;
+  /**
+   * Da dove viene questa lega: la vetrina o un utente che porta i suoi dati.
+   *
+   * Serve a un tetto, e il tetto e' la ragione per cui e' un CAMPO e non il
+   * prefisso dell'identificatore. Le leghe di prova si chiamano gia'
+   * `prova-...`, e contarle guardando quel prefisso funzionerebbe — finche'
+   * qualcuno non rinomina, e allora il limite sparirebbe senza che niente lo
+   * segnali. Un limite che si disattiva da solo e' peggio di nessun limite,
+   * perche' si continua a credere che ci sia.
+   *
+   * Assente sulle leghe create prima che il campo esistesse: si leggono come
+   * `utente`, che e' la lettura prudente — non aprono slot che non avevano.
+   */
+  origine?: 'prova' | 'utente';
   /** L'ultima giornata per cui esiste un'edizione. */
   lastMatchday: number | null;
   /**
@@ -178,6 +192,23 @@ export const MIN_PUBLISH_CONFIDENCE = 0.6;
 export function edizioneLeggibile(published: PublishedEdition): boolean {
   return published.approvedAt !== null
     || published.edition.meta.confidence >= MIN_PUBLISH_CONFIDENCE;
+}
+
+/**
+ * La forma con cui una configurazione ESCE dallo store, qualunque sia
+ * l'implementazione.
+ *
+ * Esiste per un difetto vero: `origine` e' stata aggiunta dopo, e Postgres la
+ * normalizzava leggendo la colonna vuota come `utente` mentre file e memoria
+ * restituivano `undefined`. Le tre implementazioni divergevano, e chi legge
+ * avrebbe dovuto ricordarsi di gestire entrambe le forme — cioe' avrebbe
+ * dimenticato di farlo da qualche parte.
+ *
+ * L'ha detto la suite di contratto, che gira identica sulle tre: e' esattamente
+ * il lavoro per cui esiste.
+ */
+export function normalizzaConfig(config: LeagueConfig): LeagueConfig {
+  return { ...config, origine: config.origine ?? 'utente' };
 }
 
 export interface LeagueStore {
@@ -363,7 +394,10 @@ export class FileLeagueStore implements LeagueStore {
     // rispondere "non trovata" e' anche cio' che tiene indistinguibili lega
     // inesistente e lega altrui.
     if (!SEGMENTO_VALIDO.test(`${leagueId}.json`)) return null;
-    return this.readJson<LeagueConfig | null>(this.path('config', `${leagueId}.json`), null);
+    const letta = await this.readJson<LeagueConfig | null>(
+      this.path('config', `${leagueId}.json`), null,
+    );
+    return letta === null ? null : normalizzaConfig(letta);
   }
 
   /**
@@ -599,17 +633,20 @@ export class InMemoryLeagueStore implements LeagueStore {
   private corpus: number[] = [];
 
   async listLeagues(ownerId: string): Promise<LeagueConfig[]> {
-    return [...this.configs.values()].filter((c) => c.ownerId === ownerId);
+    return [...this.configs.values()]
+      .filter((c) => c.ownerId === ownerId)
+      .map(normalizzaConfig);
   }
   async legheDaConsegnare(): Promise<LeagueConfig[]> {
-    return [...this.configs.values()].filter((c) => !!c.fonte);
+    return [...this.configs.values()].filter((c) => !!c.fonte).map(normalizzaConfig);
   }
   async getConfigForOwner(leagueId: string, ownerId: string): Promise<LeagueConfig | null> {
     const c = this.configs.get(leagueId) ?? null;
-    return c && c.ownerId === ownerId ? c : null;
+    return c && c.ownerId === ownerId ? normalizzaConfig(c) : null;
   }
   async getConfigBySlug(publicSlug: string): Promise<LeagueConfig | null> {
-    return [...this.configs.values()].find((c) => c.publicSlug === publicSlug) ?? null;
+    const c = [...this.configs.values()].find((x) => x.publicSlug === publicSlug);
+    return c ? normalizzaConfig(c) : null;
   }
   async getConfigByRelaySecret(relaySecret: string): Promise<LeagueConfig | null> {
     if (relaySecret === '') return null;

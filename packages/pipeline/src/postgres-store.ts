@@ -55,6 +55,9 @@ export class PostgresLeagueStore implements LeagueStore {
       createdAt: (row.created_at as Date).toISOString(),
       lastMatchday: row.last_matchday === null ? null : Number(row.last_matchday),
       fonte: (row.fonte as LeagueConfig['fonte']) ?? null,
+      // Assente sulle righe scritte prima che il campo esistesse: si leggono
+      // come `utente`, che e' la lettura prudente.
+      origine: (row.origine as LeagueConfig['origine']) ?? 'utente',
     };
   }
 
@@ -105,8 +108,8 @@ export class PostgresLeagueStore implements LeagueStore {
     await this.pool.query(
       `insert into leagues
          (league_id, owner_id, public_slug, relay_secret, league_name, ruleset, spice,
-          created_at, last_matchday, fonte)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+          created_at, last_matchday, fonte, origine)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
        on conflict (league_id) do update set
          owner_id = excluded.owner_id,
          public_slug = excluded.public_slug,
@@ -115,12 +118,14 @@ export class PostgresLeagueStore implements LeagueStore {
          ruleset = excluded.ruleset,
          spice = excluded.spice,
          last_matchday = excluded.last_matchday,
-         fonte = excluded.fonte`,
+         fonte = excluded.fonte,
+         origine = excluded.origine`,
       [
         config.leagueId, config.ownerId, config.publicSlug, config.relaySecret,
         config.leagueName,
         JSON.stringify(config.ruleset), config.spice, config.createdAt, config.lastMatchday,
         config.fonte ? JSON.stringify(config.fonte) : null,
+        config.origine ?? 'utente',
       ],
     );
   }

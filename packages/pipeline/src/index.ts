@@ -4,3 +4,4 @@ export * from './fonte-http.js';
 export * from './store.js';
 export * from './auth-store.js';
 export * from './postgres-store.js';
+export * from './vetrina.js';

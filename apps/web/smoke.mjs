@@ -256,6 +256,75 @@ ok('e la sua pagina chiede di attivarla',
    await mario.page.locator('button:has-text("Attiva la lega")').count() === 1);
 
 /**
+ * IL TETTO ALLA VETRINA.
+ *
+ * La lega di prova non passa dal cancello del pagamento, ed e' giusto cosi':
+ * e' l'onboarding. Ma genera tre edizioni con una chiave vera, quindi senza un
+ * tetto quell'azione si ripete all'infinito e il conto lo paga chi ospita.
+ *
+ * La regola ha i suoi test; qui si verifica il CABLAGGIO, che quelli non
+ * possono vedere. Un tetto scollegato dall'azione non e' meta' tetto: e' un
+ * tetto che non c'e' mentre sembra esserci, che e' peggio.
+ *
+ * La verifica gira con `FANTACOMICS_MAX_LEGHE_PROVA=2`, che e' anche il
+ * predefinito ma qui e' scritto apposta: se la variabile non venisse letta, il
+ * conto tornerebbe lo stesso e non lo saprebbe nessuno.
+ *
+ * Una lega di prova mario ce l'ha gia': l'ha creata la parte di sopra di
+ * questa verifica. Quindi la prima qui e' la seconda, e la seconda e' quella
+ * di troppo. E' un dettaglio che si paga caro se lo si dimentica — la prima
+ * stesura dava per scontato un conto a zero e falliva subito, accusando il
+ * tetto di un difetto che non aveva.
+ */
+async function creaLegaDiProva(nome) {
+  await mario.page.goto(`${base}/lega/nuova`, { waitUntil: 'domcontentloaded' });
+  const form = mario.page.locator('form').filter({ hasText: 'Genera la lega di prova' });
+  await form.locator('input[name="leagueName"]').fill(nome);
+  await form.locator('button:has-text("Genera la lega di prova")').click();
+}
+
+await creaLegaDiProva('Vetrina Uno');
+/**
+ * Si aspetta guardando l'INDIRIZZO, non un evento di navigazione.
+ *
+ * `/lega/` da solo corrisponde anche a `/lega/nuova`, cioe' alla pagina da cui
+ * si e' partiti: l'attesa si chiudeva subito e l'asserzione passava senza che
+ * fosse stato generato niente. Ma chiedere a `waitForURL` l'indirizzo giusto
+ * non basta: la server action naviga dal client, e quell'attesa cerca un
+ * caricamento che non avviene. Si guarda l'indirizzo, e si guarda anche
+ * l'avviso d'errore — cosi' un guasto vero si racconta invece di scadere.
+ */
+async function attendiLegaDiProva(timeoutMs = 180000) {
+  const fine = Date.now() + timeoutMs;
+  while (Date.now() < fine) {
+    if (/\/lega\/prova-/.test(mario.page.url())) return { creata: true, messaggio: '' };
+    const avvisi = mario.page.locator('.notice.error');
+    if (await avvisi.count() > 0) return { creata: false, messaggio: await avvisi.innerText() };
+    await mario.page.waitForTimeout(500);
+  }
+  return { creata: false, messaggio: 'scaduto il tempo senza ne\' lega ne\' errore' };
+}
+
+const primaProva = await attendiLegaDiProva();
+ok('la prima lega di prova si genera', primaProva.creata,
+   primaProva.creata ? mario.page.url() : primaProva.messaggio);
+
+await creaLegaDiProva('Vetrina Due');
+// Lo stesso poller, e non un'attesa sull'avviso: se il tetto venisse
+// scollegato, la lega si creerebbe e l'attesa sull'errore scadrebbe dopo tre
+// minuti con un timeout che non nomina il colpevole. Cosi' invece la verifica
+// dice «il tetto non ha fermato niente», che e' l'informazione che serve.
+const secondaProva = await attendiLegaDiProva();
+const rifiuto = secondaProva.messaggio;
+ok('la seconda viene rifiutata dal tetto', !secondaProva.creata,
+   secondaProva.creata ? `il tetto non ha fermato niente: ${mario.page.url()}` : rifiuto);
+// Un rifiuto deve dire cosa fare, non solo cosa non si puo' fare: la strada
+// c'e' ed e' quella che porta a un cliente invece che a un rimbalzo.
+ok('e indica la strada vera: caricare le rose', rifiuto.includes('file delle rose'));
+ok('e non ha creato niente lo stesso',
+   !/\/lega\/prova-/.test(mario.page.url()), mario.page.url());
+
+/**
  * E un file sbagliato deve DIRE cosa non andava.
  *
  * E' il modo piu' probabile di fallire su questo percorso: una colonna con un

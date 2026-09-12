@@ -15,7 +15,7 @@ import {
   importFromFiles, generateWorld, withOfficialScores, nudgeTeamToScore, AdapterError,
   importaRoseXlsx, stagioneDi,
 } from '@fantacomics/ingest';
-import { runMatchdayPipeline, runAnteprimaPipeline } from '@fantacomics/pipeline';
+import { puoCreareLegaDiProva, tettoLegheDiProva, runMatchdayPipeline, runAnteprimaPipeline } from '@fantacomics/pipeline';
 import { TemplateDriver, AnthropicDriver } from '@fantacomics/llm';
 import { creaSessioneCheckout } from '@fantacomics/billing';
 import { store } from '@/lib/store';
@@ -218,6 +218,8 @@ export async function creaLegaDaRose(
       leagueName, ruleset: esistente?.ruleset ?? DEFAULT_RULESET, spice,
       createdAt: esistente?.createdAt ?? new Date().toISOString(),
       lastMatchday: esistente?.lastMatchday ?? null,
+      // Dati dell'utente, non vetrina: non consuma slot e non ne apre.
+      origine: esistente?.origine ?? 'utente',
     });
 
     await store.saveRoster(leagueId, {
@@ -272,6 +274,7 @@ export async function creaLegaDaFile(
     leagueName, ruleset: DEFAULT_RULESET, spice,
     createdAt: esistente?.createdAt ?? new Date().toISOString(),
     lastMatchday: esistente?.lastMatchday ?? null,
+    origine: esistente?.origine ?? 'utente',
   });
 
   /**
@@ -326,11 +329,20 @@ export async function creaLegaDiProva(
    * e' la vetrina.
    *
    * Il costo pero' e' reale: tre edizioni di otto pezzi ciascuna, con una
-   * chiave vera. Oggi nessun limite impedisce di ripetere questa azione in
-   * continuazione, ed e' un'esposizione da chiudere prima di aprire le
-   * iscrizioni — un tetto per account, come quello che esiste gia' sulla
-   * richiesta dei magic link.
+   * chiave vera. Il tetto sta QUI, cioe' PRIMA di spendere: un controllo dopo
+   * la generazione direbbe di no avendo gia' pagato il conto.
    */
+  const esito = puoCreareLegaDiProva(
+    await store.listLeagues(account.accountId), tettoLegheDiProva(),
+  );
+  /**
+   * Si LANCIA, perche' e' cosi' che questo modulo racconta un rifiuto
+   * spiegabile: `conEsito` trasforma il messaggio in un avviso sul modulo,
+   * che e' la stessa strada dei CSV con una colonna sbagliata. Restituire qui
+   * un esito salterebbe il redirect e lascerebbe l'utente su una pagina muta.
+   */
+  if (!esito.puo) throw new Error(esito.motivo);
+
   const leagueId = `prova-${stableHash(`${leagueName}:${Date.now()}`)}`;
 
   await store.saveConfig({
@@ -340,6 +352,9 @@ export async function creaLegaDiProva(
     relaySecret: null,
     leagueName, ruleset: DEFAULT_RULESET, spice,
     createdAt: new Date().toISOString(), lastMatchday: null,
+    // Senza questo il tetto conterebbe zero per sempre, e sarebbe un limite
+    // che non limita niente mentre sembra esserci.
+    origine: 'prova',
   });
 
   // Tre giornate: con una sola non esistono archi narrativi da raccontare.

@@ -143,6 +143,10 @@ jobs:
       SMTP_USER: finto
       SMTP_PASSWORD: finta
       SMTP_FROM: noreply@fantacomics.test
+      # Il tetto alle leghe di vetrina. E' anche il predefinito, ed e' scritto
+      # apposta: se la variabile non venisse letta, il conto tornerebbe lo
+      # stesso e non lo saprebbe nessuno.
+      FANTACOMICS_MAX_LEGHE_PROVA: '2'
       # Il cron e il servizio finto della verifica della consegna automatica.
       # La porta e' fissa perche' l'app legge l'indirizzo all'avvio, cioe'
       # prima che il servizio esista.

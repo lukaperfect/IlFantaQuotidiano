@@ -253,6 +253,20 @@ for (const impl of implementazioni) {
       expect(letta?.fonte).toEqual({ profilo: 'servizio-di-prova', leagueExternalId: 'ext-1' });
     });
 
+    it('l\'origine sopravvive al giro, e chi non ce l\'ha si legge come utente', async () => {
+      // E' il campo su cui si regge il tetto alle leghe di vetrina. Se non
+      // tornasse indietro, il tetto non conterebbe niente e nessuno lo
+      // saprebbe: le leghe si creerebbero all'infinito con la catena verde.
+      await env.league.saveConfig(lega({ origine: 'prova' }));
+      expect((await env.league.getConfigForOwner('lega-1', 'acc-mario'))?.origine).toBe('prova');
+
+      // Le leghe scritte prima che il campo esistesse non hanno nessuna
+      // origine: si leggono come `utente`, che e' la lettura prudente — non
+      // aprono uno slot che non avevano.
+      await env.league.saveConfig(lega({}));
+      expect((await env.league.getConfigForOwner('lega-1', 'acc-mario'))?.origine).toBe('utente');
+    });
+
     it('togliere la fonte la toglie davvero, e la lega esce dai compiti', async () => {
       await env.league.saveConfig(lega({
         fonte: { profilo: 'servizio-di-prova', leagueExternalId: 'ext-1' },

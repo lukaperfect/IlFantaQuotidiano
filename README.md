@@ -34,7 +34,7 @@ Da qui tre inversioni che governano tutto il codice:
 
 ```bash
 pnpm install
-pnpm test                                   # 591 test (578 senza database)
+pnpm test                                   # 602 test (589 senza database)
 pnpm demo -- --out out --giornate 6         # una stagione simulata end-to-end
 pnpm demo -- --out out --giornate 4 --assets   # aggiunge PDF A3 e un campione di card in PNG
 
@@ -850,6 +850,42 @@ ricalcolando il fantavoto da voto e bonus con la tabella standard — gol +3,
 assist +1, rigore parato +3, autorete −2, gol subito −1, giallo −0,5, rosso −1 —
 **torna su 285 giocatori su 285**.
 
+## Il tetto alla vetrina
+
+La lega di prova non passa dal cancello del pagamento, ed e' una scelta:
+chiedere 4,99 euro a chi non ha ancora visto il prodotto e' il modo piu' sicuro
+di perderlo. I dati sono sintetici, quindi non e' il prodotto regalato — e' la
+vetrina. Ma genera tre edizioni con una chiave vera, e senza un tetto
+quell'azione si ripete all'infinito mentre il conto lo paga chi ospita.
+
+**Due per account**, configurabile. Una per guardare il prodotto, una per
+riprovare con impostazioni diverse; la terza non mostra niente di nuovo.
+
+Il tetto conta il campo `origine`, non il prefisso dell'identificatore. Le leghe
+di prova si chiamano gia' `prova-...` e contarle da li' funzionerebbe — finche'
+qualcuno non rinomina, e allora il limite sparirebbe senza che niente lo
+segnali. Un limite che si disattiva da solo e' peggio di nessun limite, perche'
+si continua a credere che ci sia.
+
+Tre cose imparate scrivendolo, tutte da qualcosa che e' fallito:
+
+- **le tre implementazioni dello store divergevano.** Postgres leggeva la
+  colonna vuota come `utente`, file e memoria restituivano `undefined`. L'ha
+  detto la suite di contratto, che gira identica sulle tre: adesso una sola
+  funzione normalizza in lettura, e chi legge non deve ricordarsi di gestire
+  due forme — cioe' non puo' dimenticarsene da qualche parte
+- **una variabile d'ambiente vuota non e' zero.** `Number('')` fa zero, quindi
+  la lettura ingenua spegneva la vetrina ogni volta che un file di deploy
+  dichiarava la variabile senza valorizzarla
+- **il controllo sta prima di spendere.** Dopo la generazione direbbe di no
+  avendo gia' pagato il conto
+
+E la regola sta in una funzione pura con i suoi test, mentre il **cablaggio**
+lo verifica il browser: un tetto scollegato dall'azione non e' meta' tetto, e'
+un tetto che non c'e' mentre sembra esserci. Mutato via il collegamento, la
+verifica dice «il tetto non ha fermato niente» invece di scadere dopo tre
+minuti con un timeout che non nomina il colpevole.
+
 ## La posta
 
 Finche' esistevano solo il mailer su console e quello su file, il magic link si
@@ -983,8 +1019,7 @@ Per andare in produzione servono, nell'ordine:
 
 1. **Le chiavi vere di Stripe** e l'endpoint del webhook registrato sulla
    dashboard. Il codice c'e' ed e' verificato contro un finto; quel che manca
-   e' configurazione. Insieme, un **tetto alle leghe di prova** per account:
-   oggi la vetrina si puo' ripetere senza limiti e costa token veri.
+   e' configurazione.
 2. **Il piano globale: fatto, ma la prima richiesta vera non l'ha fatta
    nessuno.** Il profilo `fantacalcio-it` e' completo — indirizzo con stagione
    e giornata, selettori presi da una pagina pubblicata davvero, test su un suo
