@@ -256,6 +256,34 @@ ok('e la sua pagina chiede di attivarla',
    await mario.page.locator('button:has-text("Attiva la lega")').count() === 1);
 
 /**
+ * LE PAGINE LEGALI DEVONO ESSERE RAGGIUNGIBILI PRIMA DI PAGARE.
+ *
+ * Non e' una cortesia: termini e privacy vanno messi a disposizione prima
+ * dell'acquisto, e una pagina che esiste ma che nessun collegamento raggiunge
+ * non e' messa a disposizione di nessuno.
+ *
+ * E finche' i dati del titolare non sono configurati, quelle pagine devono
+ * DIRE di essere incomplete. Dei termini con dentro un segnaposto sembrano
+ * validi a chi li legge di sfuggita, ed e' esattamente il momento in cui non
+ * lo sono.
+ */
+for (const [percorso, titolo] of [['/termini', 'Termini di servizio'], ['/privacy', 'Informativa privacy']]) {
+  const r = await fetch(`${base}${percorso}`);
+  const html = await r.text();
+  ok(`${percorso} risponde senza account`, r.status === 200, `status ${r.status}`);
+  ok(`${percorso} e' la pagina giusta`, html.includes(titolo));
+  ok(`${percorso} dichiara di essere una bozza finche' manca il titolare`,
+     html.includes('Bozza incompleta'));
+}
+
+{
+  const html = await (await fetch(`${base}/accedi`)).text();
+  // Dalla pagina d'accesso, cioe' da prima di avere un account.
+  ok('i termini si raggiungono dalla pagina d\'accesso', html.includes('href="/termini"'));
+  ok('e la privacy pure', html.includes('href="/privacy"'));
+}
+
+/**
  * IL TETTO ALLA VETRINA.
  *
  * La lega di prova non passa dal cancello del pagamento, ed e' giusto cosi':

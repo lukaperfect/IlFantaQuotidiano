@@ -34,7 +34,7 @@ Da qui tre inversioni che governano tutto il codice:
 
 ```bash
 pnpm install
-pnpm test                                   # 602 test (589 senza database)
+pnpm test                                   # 606 test (593 senza database)
 pnpm demo -- --out out --giornate 6         # una stagione simulata end-to-end
 pnpm demo -- --out out --giornate 4 --assets   # aggiunge PDF A3 e un campione di card in PNG
 
@@ -850,6 +850,34 @@ ricalcolando il fantavoto da voto e bonus con la tabella standard — gol +3,
 assist +1, rigore parato +3, autorete −2, gol subito −1, giallo −0,5, rosso −1 —
 **torna su 285 giocatori su 285**.
 
+## Termini e privacy
+
+Ci sono, sono raggiungibili **prima di pagare** — dalla pagina d'accesso, cioe'
+da prima di avere un account — e sono una **bozza di lavoro** che lo dice da
+sola. Finche' `FANTACOMICS_TITOLARE`, `FANTACOMICS_PIVA`,
+`FANTACOMICS_INDIRIZZO` e `FANTACOMICS_EMAIL_CONTATTO` non sono configurati, le
+due pagine mostrano un avviso in testa: dei termini con dentro un segnaposto
+sembrano validi a chi li legge di sfuggita, ed e' esattamente il momento in cui
+non lo sono. La regola e' tutto-o-niente, e una variabile vuota vale come
+assente.
+
+Due cose vanno guardate da chi pubblica, perche' non sono scelte tecniche:
+
+**Il recesso.** Un contenuto digitale consegnato subito fa perdere al
+consumatore i quattordici giorni di ripensamento, ma solo se lo ha accettato
+espressamente *prima* dell'acquisto. Quell'accettazione va raccolta nel
+checkout: senza, il diritto resta — quattordici giorni su un prodotto gia'
+consegnato. I termini lo dicono, il checkout non lo chiede ancora.
+
+**I nomi dei presidenti.** Finiscono nel testo del giornale e, con una chiave
+vera, passano dal fornitore del modello. Sono dati personali di persone che non
+hanno un account qui: le carica l'amministratore della lega. L'informativa li
+nomina, dice a chi vanno e come si fanno togliere — e nomina il fornitore
+**solo se lo si sta davvero usando**, perche' dichiarare un trasferimento che
+non avviene e' sbagliato quanto tacerne uno che avviene.
+
+Restano una bozza: vanno lette da un legale prima di incassare il primo euro.
+
 ## Il tetto alla vetrina
 
 La lega di prova non passa dal cancello del pagamento, ed e' una scelta:
@@ -1037,6 +1065,8 @@ Per andare in produzione servono, nell'ordine:
    condivisione su WhatsApp (l'API di WhatsApp non scrive nei gruppi: qualsiasi
    piano che lo assuma è irrealizzabile).
 5. **Fonte xG** con licenza commerciale verificata.
+5bis. **Termini e privacy letti da un legale**, e l'accettazione del recesso
+   raccolta nel checkout: il testo c'e' ed e' dichiaratamente una bozza.
 6. **Revisione umana al 100%** per le prime settimane: è così che si costruisce
    il dataset di stile, non un ripiego.
 7. **pgvector** per la memoria semantica anti-ripetizione: oggi il cooldown è

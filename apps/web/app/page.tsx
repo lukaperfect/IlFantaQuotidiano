@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Legale } from '@/app/legale';
 import { store } from '@/lib/store';
 import { requireAccount } from '@/lib/session';
 
@@ -51,6 +52,7 @@ export default async function Home() {
 
       <footer className="colophon-row">
         <span className="muted small">{account.email}</span>
+        <Legale />
         <form action="/esci" method="post">
           <button className="btn" type="submit">Esci</button>
         </form>

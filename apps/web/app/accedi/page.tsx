@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Legale } from '@/app/legale';
 import { currentAccount } from '@/lib/session';
 import { redirect } from 'next/navigation';
 import { LoginForm } from './form';
@@ -34,6 +35,8 @@ export default async function Accedi({
       </p>
 
       <LoginForm />
+
+      <footer className="colophon-row"><Legale /></footer>
     </main>
   );
 }
