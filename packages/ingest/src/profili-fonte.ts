@@ -43,14 +43,23 @@ import { ProfiloFonteSchema, type ProfiloFonte } from './collectors/http-fonte.j
  * invasivo possibile — ci si presenta con un contatto, si rispetta il
  * robots.txt, e si legge UNA pagina per giornata per tutte le leghe insieme.
  *
- * PERCHE' NON C'E' LA GIORNATA NELL'INDIRIZZO. Perche' su quel sito non
- * esiste: i menu di giornata sono guidati da JavaScript e l'indirizzo resta
- * lo stesso. Si legge quindi «la giornata corrente», e siccome leggere la
- * settimana sbagliata e' il difetto che nessun controllo a valle puo'
- * scoprire — i numeri sarebbero coerenti, solo di un'altra settimana — la
- * pagina deve DICHIARARE la propria giornata (`campoGiornata`) e viene
- * rifiutata se non e' quella chiesta. Non e' una limitazione da aggirare: e'
- * il momento in cui il disallineamento diventa visibile.
+ * LA GIORNATA STA NELL'INDIRIZZO, e la stagione con lei:
+ * `/voti-fantacalcio-serie-a/2026-27/4`. Quel formato di stagione e' gia'
+ * quello che `stagioneDi` produce, quindi i due segnaposto bastano e non
+ * serve nessuna conversione.
+ *
+ * E LA PAGINA DEVE COMUNQUE DICHIARARE CHE GIORNATA E'. Non e' ridondanza:
+ * un indirizzo puo' reindirizzare — alla giornata corrente, all'ultima
+ * giocata — e chiedere la 4 ricevendo la 3 e' il difetto che nessun controllo
+ * a valle puo' scoprire, perche' i numeri sarebbero coerenti, solo di
+ * un'altra settimana. `campoGiornata` confronta cio' che si e' chiesto con
+ * cio' che e' arrivato, e un disallineamento ferma tutto invece di pubblicare.
+ *
+ * IL LORO robots.txt CONSENTE QUESTA PAGINA. Verificato col nostro stesso
+ * parser sul loro file vero, che sta in `__fixtures__/robots-fantacalcio.txt`
+ * e su cui gira un test: il gruppo `*` vieta ricerca, preview, test e un paio
+ * d'altre cose, non i voti, e non chiede nessuna attesa fra le richieste.
+ * Vietare e' invece tutto per `ia_archiver`, che non siamo noi.
  *
  * DUE ENDPOINT SULLA STESSA PAGINA, QUINDI DUE LETTURE. Lo si e' accettato
  * invece di introdurre una cache per indirizzo: due letture per giornata sono
@@ -95,7 +104,7 @@ export function profiloFantacalcioIt(): ProfiloFonte {
     attesaMinimaMs: 2000,
     endpoints: {
       voti: {
-        percorso: '/voti-fantacalcio-serie-a',
+        percorso: '/voti-fantacalcio-serie-a/{season}/{matchday}',
         piano: 'globale',
         estrazione: 'dom',
         campoGiornata: 'giornata',
@@ -165,7 +174,7 @@ export function profiloFantacalcioIt(): ProfiloFonte {
        * tabella, che il sito marca con `current` sul primo nome.
        */
       partite: {
-        percorso: '/voti-fantacalcio-serie-a',
+        percorso: '/voti-fantacalcio-serie-a/{season}/{matchday}',
         piano: 'globale',
         facoltativo: true,
         estrazione: 'dom',

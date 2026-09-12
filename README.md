@@ -802,19 +802,33 @@ L'ordine dei passaggi e' una garanzia, non uno stile: si guarda il segnaposto
 da li' in poi nessun controllo potrebbe piu' distinguerlo da un voto fuori
 scala.
 
-### La pagina deve dire di che giornata parla
+### L'indirizzo, e perche' non basta
 
-Su quel sito la giornata **non sta nell'indirizzo**: i menu sono guidati da
-JavaScript e l'indirizzo resta lo stesso. Si legge quindi «la giornata
-corrente», e questo apre il difetto peggiore che il progetto possa avere: letta
-in ritardo — un guasto, un posticipo, un cron fermo un giorno — quella pagina
-restituisce la settimana DOPO. Non assomiglia a un guasto. I voti sarebbero
-coerenti, i conti tornerebbero, e il giornale della terza giornata
-racconterebbe la quarta.
+`/voti-fantacalcio-serie-a/2026-27/4`: stagione e giornata stanno li', e quel
+formato di stagione e' gia' quello che `stagioneDi` produce — due segnaposto,
+nessuna conversione. La pagina risponde **senza login**.
 
-Per questo `campoGiornata` dice quale campo porta la giornata **dichiarata dalla
-pagina**, e un disallineamento e' un errore non riprovabile: rileggere non
-cambia la settimana, e la decisione spetta alla macchina a stati.
+E deve comunque **dichiarare che giornata e'**. Non e' ridondanza: un indirizzo
+puo' reindirizzare — alla giornata corrente, all'ultima giocata — e chiedere la
+4 ricevendo la 3 e' il difetto peggiore che questo progetto possa avere. Non
+assomiglia a un guasto: i voti sarebbero coerenti, i conti tornerebbero, e il
+giornale della terza racconterebbe la quarta. Nessun controllo a valle puo'
+vederlo.
+
+`campoGiornata` confronta cio' che si e' chiesto con cio' che e' arrivato, e un
+disallineamento e' un errore **non riprovabile**: rileggere non cambia la
+settimana, e la decisione spetta alla macchina a stati.
+
+### Il loro robots.txt consente questa pagina
+
+Verificato col nostro stesso parser sul loro file vero, committato in
+`__fixtures__/robots-fantacalcio.txt` con un test sopra. Il gruppo `*` vieta
+ricerca, preview, test e un paio d'altre cose — non i voti — e non chiede
+nessuna attesa fra le richieste; il divieto totale e' per `ia_archiver`, che non
+siamo noi. Il file e' li' tale e quale perche' un riassunto scritto a mano
+proverebbe il parser contro l'idea che ci si e' fatti delle loro regole, e
+quell'idea e' esattamente cio' che si sta verificando. Se un giorno cambiano e
+chiedono un'attesa, quel test cade e l'attesa va rispettata.
 
 ### Cosa quella pagina da', e cosa no
 
@@ -916,13 +930,12 @@ Per andare in produzione servono, nell'ordine:
    dashboard. Il codice c'e' ed e' verificato contro un finto; quel che manca
    e' configurazione. Insieme, un **tetto alle leghe di prova** per account:
    oggi la vetrina si puo' ripetere senza limiti e costa token veri.
-2. **Il piano globale: fatto, ma da provare contro il sito vero.** Il profilo
-   `fantacalcio-it` esiste, i suoi selettori vengono da una pagina pubblicata
-   davvero e i test girano su un ritaglio di quella pagina — ma da questo
-   ambiente quel dominio non e' raggiungibile, quindi la prima richiesta vera
-   non l'ha ancora fatta nessuno. Restano due cose da guardare con un browser:
-   se da **sloggati** le tre colonne di voti sono ancora piene, e cosa dice il
-   loro **robots.txt** (il codice lo rispetta da solo, ma va saputo prima).
+2. **Il piano globale: fatto, ma la prima richiesta vera non l'ha fatta
+   nessuno.** Il profilo `fantacalcio-it` e' completo — indirizzo con stagione
+   e giornata, selettori presi da una pagina pubblicata davvero, test su un suo
+   ritaglio, robots.txt loro verificato — ma da questo ambiente quel dominio non
+   e' raggiungibile, quindi va eseguito una volta da una macchina che lo
+   raggiunge, su una giornata finita, guardando che la riconciliazione torni.
    Il piano della LEGA — chi ha schierato chi — non sta li' e resta
    all'estensione: non e' dato di quel sito, e' dato privato dell'utente.
 3. **Un provider di posta vero**: il `Mailer` è un'interfaccia con

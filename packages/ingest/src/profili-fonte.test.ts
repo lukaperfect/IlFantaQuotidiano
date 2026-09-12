@@ -4,6 +4,8 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { profiloFonte, profiliDaAmbiente, profiloFantacalcioIt } from './profili-fonte.js';
 import { estraiDaDom } from './collectors/dom-tabella.js';
+import { riempi } from './collectors/http-fonte.js';
+import { stagioneDi } from './collectors/relay-import.js';
 import { applyMapping, mappingCoverage } from './collectors/extension-relay.js';
 
 /**
@@ -98,6 +100,15 @@ describe('il profilo di fantacalcio.it, contro la pagina vera', () => {
   const righe = estraiDaDom(html, profilo.endpoints.voti!.selettori!);
   const canonici = applyMapping(righe, profilo.mappings.voti!);
   const di = (nome: string) => canonici.find((r) => r.playerName === nome);
+
+  it('l\'indirizzo si compone con stagione e giornata, senza conversioni', () => {
+    // Il formato di stagione del sito — «2026-27» — e' gia' quello che
+    // `stagioneDi` produce. Se un giorno divergessero, questo test cade qui
+    // invece che alla prima consegna di domenica sera.
+    expect(riempi(profilo.endpoints.voti!.percorso, { matchday: 4, season: '2026-27' }))
+      .toBe('/voti-fantacalcio-serie-a/2026-27/4');
+    expect(stagioneDi(new Date('2026-09-12T00:00:00Z'))).toBe('2026-27');
+  });
 
   it('estrae i giocatori con i campi canonici pieni', () => {
     expect(canonici).toHaveLength(16);

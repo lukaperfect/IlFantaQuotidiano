@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   analizzaRobots, consentito, scaricaRobots, ROBOTS_PERMISSIVO,
 } from './collectors/robots.js';
@@ -162,5 +165,56 @@ describe('scarico del robots.txt', () => {
       fetchImpl: finto({ stato: 200, corpo: 'x'.repeat(600 * 1024) }),
     });
     expect(r).toEqual(ROBOTS_PERMISSIVO);
+  });
+});
+
+describe('il robots.txt vero della testata che pubblica i voti', () => {
+  /**
+   * Il file e' quello loro, committato tale e quale. Un riassunto scritto a
+   * mano proverebbe il parser contro l'idea che ci si e' fatti delle loro
+   * regole, e quell'idea e' esattamente cio' che si sta verificando.
+   *
+   * Questo test e' anche la risposta scritta a una domanda che va fatta prima
+   * di leggere il sito di qualcun altro: quel sito ha chiesto di non farlo?
+   * Per questa pagina, no.
+   */
+  const VERO = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), '__fixtures__', 'robots-fantacalcio.txt'),
+    'utf8',
+  );
+  it('la pagina dei voti e\' consentita, con e senza giornata', () => {
+    const r = analizzaRobots(VERO, NOI);
+    expect(consentito(r, '/voti-fantacalcio-serie-a/2026-27/4')).toBe(true);
+    expect(consentito(r, '/voti-fantacalcio-serie-a')).toBe(true);
+  });
+
+  it('e cio\' che hanno vietato resta vietato', () => {
+    const r = analizzaRobots(VERO, NOI);
+    for (const p of ['/ricerca', '/ricerca?q=x', '/test/', '/homesheet',
+      '/probabiliformazioniseriea']) {
+      expect(consentito(r, p), p).toBe(false);
+    }
+  });
+
+  it('il carattere jolly in testa vale davvero: `*/preview/` prende qualunque preview', () => {
+    // Una regola che comincia per `*` e' il caso che un parser ingenuo sbaglia:
+    // confrontando per prefisso, `*/preview/` non corrisponderebbe a niente e
+    // si finirebbe per leggere pagine che il sito ha chiesto di lasciare stare.
+    const r = analizzaRobots(VERO, NOI);
+    expect(consentito(r, '/preview/')).toBe(false);
+    expect(consentito(r, '/qualcosa/preview/altro')).toBe(false);
+    expect(consentito(r, '/serie-a/squadre/atalanta')).toBe(true);
+  });
+
+  it('il gruppo di un altro agente non e\' il nostro', () => {
+    // `ia_archiver` ha un divieto totale. Prendere il gruppo sbagliato — o
+    // peggio, unire i gruppi — vieterebbe tutto a chiunque.
+    expect(consentito(analizzaRobots(VERO, 'ia_archiver'), '/voti-fantacalcio-serie-a')).toBe(false);
+    expect(consentito(analizzaRobots(VERO, NOI), '/voti-fantacalcio-serie-a')).toBe(true);
+  });
+
+  it('non chiedono nessuna attesa fra una richiesta e l\'altra', () => {
+    // Se un giorno la chiedessero, questo test cade e l'attesa va rispettata.
+    expect(analizzaRobots(VERO, NOI).attesaSecondi).toBeNull();
   });
 });
