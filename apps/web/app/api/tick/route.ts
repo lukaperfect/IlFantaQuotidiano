@@ -146,3 +146,22 @@ export async function POST(req: Request): Promise<Response> {
     { headers: { 'cache-control': 'no-store' } },
   );
 }
+
+/**
+ * LA STESSA COSA IN GET, perche' i cron delle piattaforme sanno fare solo
+ * quello.
+ *
+ * Altrove in questo progetto una GET che cambia stato e' un difetto, e la
+ * ragione e' precisa: una GET si attiva seguendo un collegamento qualunque,
+ * quindi un'azione che apre sessioni o spende soldi puo' essere innescata da
+ * un'immagine in una pagina altrui.
+ *
+ * Qui quella ragione non si applica, ed e' per questo che l'eccezione e'
+ * accettabile invece che comoda: l'accesso e' autenticato da un segreto in
+ * INTESTAZIONE, e una navigazione del browser le intestazioni non le imposta.
+ * Un collegamento a questo indirizzo, cliccato da chiunque, riceve 401 come
+ * qualunque altra richiesta senza segreto.
+ */
+export async function GET(req: Request): Promise<Response> {
+  return POST(req);
+}

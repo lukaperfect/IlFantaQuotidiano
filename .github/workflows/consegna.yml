@@ -1,0 +1,73 @@
+name: Consegna
+
+# IL CRON CHE FA USCIRE IL GIORNALE.
+#
+# Sta qui e non nel cron della piattaforma di hosting per una ragione di
+# frequenza, non di gusto: il piano gratuito di Vercel consente una sola
+# esecuzione al giorno, e la macchina a stati ha bisogno di DUE letture
+# identiche consecutive per considerare stabili i voti. Con una passata al
+# giorno, quelle due letture costano due giorni, e il retrospettivo uscirebbe
+# sempre in ritardo di ventiquattro ore.
+#
+# Ogni ora invece e' abbondante e non costa niente. Il tick non e' un ciclo:
+# una passata e torna, e decide da solo se c'e' qualcosa da consegnare.
+# Interrogare non spende una richiesta al fornitore se non e' il momento —
+# l'attesa fra le letture la decide la macchina a stati, non questo file.
+#
+# ATTENZIONE: gli `schedule` di GitHub girano SOLO sul branch predefinito.
+# Finche' questo file non e' su main, non parte niente.
+
+on:
+  schedule:
+    # Ogni ora. Gli orari di GitHub sono approssimativi e possono slittare di
+    # qualche minuto: va benissimo, perche' la finestra di uscita e' larga ore
+    # e chi decide «adesso» sono i dati, non l'orologio.
+    - cron: '7 * * * *'
+  # Per farlo partire a mano dopo un guasto del fornitore, senza aspettare.
+  workflow_dispatch:
+    inputs:
+      forza:
+        description: "Ricontrolla subito, ignorando l'attesa fra le richieste"
+        type: boolean
+        default: false
+
+concurrency:
+  # Due passate sovrapposte leggerebbero due volte la stessa giornata e
+  # potrebbero pubblicare la stessa edizione in parallelo. La pipeline e'
+  # idempotente, ma sprecare una richiesta a un sito altrui e' proprio cio' che
+  # tutto il resto del progetto e' costruito per evitare.
+  group: consegna
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    name: Una passata del pianificatore
+    runs-on: ubuntu-latest
+    steps:
+      - name: Chiama il tick
+        env:
+          URL: ${{ secrets.FANTACOMICS_URL }}
+          SEGRETO: ${{ secrets.FANTACOMICS_CRON_SECRET }}
+        run: |
+          if [ -z "$URL" ] || [ -z "$SEGRETO" ]; then
+            echo "Mancano i segreti FANTACOMICS_URL e FANTACOMICS_CRON_SECRET."
+            exit 1
+          fi
+          FORZA=""
+          if [ "${{ inputs.forza }}" = "true" ]; then FORZA="?forza=1"; fi
+
+          # `-sS` per tacere la barra di avanzamento ma NON gli errori, e il
+          # corpo si salva su file: finisce nel log del passo, che e' l'unico
+          # posto dove si puo' leggere cosa ha deciso il pianificatore.
+          STATO=$(curl -sS -o /tmp/esito.json -w '%{http_code}' \
+            -X POST "$URL/api/tick$FORZA" \
+            -H "Authorization: Bearer $SEGRETO" \
+            --max-time 300 --retry 2 --retry-delay 10 --retry-connrefused)
+
+          echo "stato: $STATO"
+          cat /tmp/esito.json | head -c 4000
+          echo
+
+          # Un 401 e' un segreto sbagliato e non si aggiusta da solo: meglio
+          # una run rossa che un giornale che non esce piu' in silenzio.
+          [ "$STATO" = "200" ] || exit 1
