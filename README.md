@@ -34,7 +34,7 @@ Da qui tre inversioni che governano tutto il codice:
 
 ```bash
 pnpm install
-pnpm test                                   # 261 test (246 senza database)
+pnpm test                                   # 576 test (563 senza database)
 pnpm demo -- --out out --giornate 6         # una stagione simulata end-to-end
 pnpm demo -- --out out --giornate 4 --assets   # aggiunge PDF A3 e un campione di card in PNG
 
@@ -721,6 +721,10 @@ sembra pronto e fallisce al primo dato vero, ed e' esattamente l'errore contro
 cui e' costruito il resto del progetto. Si ricavano con `ispeziona-fonte.ts`
 eseguito da una macchina che quel sito lo raggiunge.
 
+Per **fantacalcio.it questo lavoro e' fatto**: il profilo `fantacalcio-it`
+esiste, i suoi selettori vengono da una pagina vera e i test girano su un
+ritaglio di quella pagina. Cosa resta sotto.
+
 ### Ricavarli senza avere un terminale
 
 Serve un browser e nient'altro. `strumenti/raccogli-fonte.js` si incolla nella
@@ -756,6 +760,81 @@ clonarla la rompe davvero, e leggere `responseText` su una XHR con
 `responseType: 'json'` lancia — e portarsi via un segreto. La prima versione se
 lo portava via: stava nello script incorporato della pagina, non
 nell'indirizzo. L'ha detto la verifica, non una rilettura del codice.
+
+## Leggere il DOM, quando non c'e' nessun JSON
+
+La pagina che pubblica i voti non interroga nessun endpoint: **quarantuno
+richieste di rete e zero verso il proprio dominio** — sono tutte pubblicita' e
+statistiche. I dati li scrive il server dentro il documento. E' il caso piu'
+scomodo da leggere e il piu' comodo da consumare: **una sola GET per giornata**,
+nessun formato interno che cambia senza preavviso.
+
+`estrazione: "dom"` sull'endpoint, e i **selettori nel profilo**. Non sono
+regexp: e' un motore di selettori CSS vero, e la ragione e' quella per cui
+esiste tutto il resto dell'ingestione — i selettori sono un DATO, aggiornabile
+senza rilascio. Con delle espressioni scritte a mano quella promessa sarebbe
+falsa, perche' al primo annidamento in piu' servirebbe un programmatore.
+
+Il linguaggio dei selettori ha solo cio' che la pagina vera ha imposto, e ogni
+voce si e' guadagnata il posto:
+
+| | perche' esiste |
+|---|---|
+| `gruppo` | la squadra e il risultato stanno nell'intestazione della tabella, non nella riga |
+| `documento` | la giornata sta in un menu, ed e' un fatto della pagina intera |
+| `indice` | tre testate votano lo stesso giocatore in tre colonne identiche |
+| `da: "classe"` | il cartellino e' una classe CSS sul voto, non una colonna |
+| `estrai` + `componi` | l'identificatore sta dentro un indirizzo; la data e' `05/09/2026` |
+| `fuso` | «20:45» vuol dire 20:45 *a Roma* |
+| `mappa` | i ruoli del sito non sono quelli canonici |
+| `vuotoSe` | **`55` non e' 5,5: e' «senza voto»** |
+
+Quell'ultima riga e' la trappola del mestiere. Cinquantasei voti valgono `55`,
+e leggerli come numero darebbe un voto di cinquantacinque. La prova che e' un
+segnaposto e non un mezzo punto senza virgola e' aritmetica: due giocatori
+hanno `55` **e l'ammonizione**, e il loro fantavoto resta `55`, mentre in tutti
+gli altri 285 casi il giallo toglie esattamente 0,5. Il malus non si applica
+perche' non c'e' voto a cui applicarlo. E nessun altro mezzo punto compare mai
+senza virgola: `6,5` e `7,5` sono sempre scritti per bene.
+
+L'ordine dei passaggi e' una garanzia, non uno stile: si guarda il segnaposto
+**prima** di convertire in numero. Al contrario «senza voto» diventerebbe 55, e
+da li' in poi nessun controllo potrebbe piu' distinguerlo da un voto fuori
+scala.
+
+### La pagina deve dire di che giornata parla
+
+Su quel sito la giornata **non sta nell'indirizzo**: i menu sono guidati da
+JavaScript e l'indirizzo resta lo stesso. Si legge quindi «la giornata
+corrente», e questo apre il difetto peggiore che il progetto possa avere: letta
+in ritardo — un guasto, un posticipo, un cron fermo un giorno — quella pagina
+restituisce la settimana DOPO. Non assomiglia a un guasto. I voti sarebbero
+coerenti, i conti tornerebbero, e il giornale della terza giornata
+racconterebbe la quarta.
+
+Per questo `campoGiornata` dice quale campo porta la giornata **dichiarata dalla
+pagina**, e un disallineamento e' un errore non riprovabile: rileggere non
+cambia la settimana, e la decisione spetta alla macchina a stati.
+
+### Cosa quella pagina da', e cosa no
+
+Per 339 righe in 20 tabelle: identificatore stabile del giocatore, nome, ruolo,
+squadra, **tre** voti con altrettanti fantavoti (redazione, statistico,
+«Italia»), gol, gol subiti, autoreti, rigori segnati, sbagliati e parati,
+assist, migliore in campo, ammonizioni, espulsioni, subentri — e in piu'
+**risultato e orario** di ogni partita di Serie A, che e' cio' che decide quale
+dei due numeri della settimana e' dovuto.
+
+Non da' i **minuti giocati**. Verificato invece che sperato: non servono. Il
+motore decide le sostituzioni automatiche su «senza voto», e la macchina a
+stati riconosce una giornata finita dal fatto che ogni squadra scesa in campo
+ha dei voti. Nessuno dei due guarda i minuti, e nel dominio `minutes` ha un
+valore predefinito e zero usi.
+
+La prova che la lettura e' giusta e non soltanto plausibile e' aritmetica:
+ricalcolando il fantavoto da voto e bonus con la tabella standard — gol +3,
+assist +1, rigore parato +3, autorete −2, gol subito −1, giallo −0,5, rosso −1 —
+**torna su 285 giocatori su 285**.
 
 ## Il pagamento
 
@@ -837,10 +916,15 @@ Per andare in produzione servono, nell'ordine:
    dashboard. Il codice c'e' ed e' verificato contro un finto; quel che manca
    e' configurazione. Insieme, un **tetto alle leghe di prova** per account:
    oggi la vetrina si puo' ripetere senza limiti e costa token veri.
-2. **Una chiave per un fornitore del piano globale.** La catena HTTP c'e' ed e'
-   verificata end-to-end; manca un profilo puntato su un servizio reale, che e'
-   configurazione, non codice. Da fare con `ispeziona-fonte.ts` e una chiave.
-   Nessuno di quei servizi da' il *voto*: quello resta all'estensione.
+2. **Il piano globale: fatto, ma da provare contro il sito vero.** Il profilo
+   `fantacalcio-it` esiste, i suoi selettori vengono da una pagina pubblicata
+   davvero e i test girano su un ritaglio di quella pagina — ma da questo
+   ambiente quel dominio non e' raggiungibile, quindi la prima richiesta vera
+   non l'ha ancora fatta nessuno. Restano due cose da guardare con un browser:
+   se da **sloggati** le tre colonne di voti sono ancora piene, e cosa dice il
+   loro **robots.txt** (il codice lo rispetta da solo, ma va saputo prima).
+   Il piano della LEGA — chi ha schierato chi — non sta li' e resta
+   all'estensione: non e' dato di quel sito, e' dato privato dell'utente.
 3. **Un provider di posta vero**: il `Mailer` è un'interfaccia con
    implementazioni su console e su file. Serve collegarci un servizio prima di
    far accedere qualcuno che non sia sulla stessa macchina.

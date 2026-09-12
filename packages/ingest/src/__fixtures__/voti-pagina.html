@@ -1,0 +1,795 @@
+<!--
+  RITAGLIO DI UNA PAGINA PUBBLICATA, tenuto qui come fixture di prova.
+
+  Provenienza: www.fantacalcio.it/voti-fantacalcio-serie-a, 3a giornata
+  2026/27, salvata dal browser il 2026-09-11. Contiene UNA delle venti
+  tabelle (Atalanta) piu' i due menu di stagione e giornata; tutto il resto
+  della pagina — testata, pubblicita', fogli di stile, script — e' stato
+  tolto.
+
+  PERCHE' VERBATIM E NON RISCRITTO A MANO. Perche' una fixture riscritta
+  prova i selettori contro l'idea che ci si e' fatti del markup, non contro
+  il markup. Ed e' proprio li' che questo lavoro si rompe: il cartellino in
+  una classe CSS, il voto «55» che non e' 5,5, tre colonne identiche. Un
+  finto pulito non avrebbe nessuna di queste cose, e i test passerebbero
+  mentre la fonte vera cade.
+
+  I dati di Serie A e i voti appartengono alla testata che li pubblica.
+  Questo ritaglio sta qui per verificare l'interoperabilita' del lettore, non
+  per ridistribuire il contenuto.
+-->
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8">
+<title>Voti Fantacalcio Serie A 3 giornata - stagione 2026/27</title></head>
+<body>
+<div class="filters">
+<select id="season">
+                    <option value="2026/27" selected="">Stagione 2026/27</option>
+                    <option value="2025/26">Stagione 2025/26</option>
+                    <option value="2024/25">Stagione 2024/25</option>
+                    <option value="2023/24">Stagione 2023/24</option>
+                    <option value="2022/23">Stagione 2022/23</option>
+                    <option value="2021/22">Stagione 2021/22</option>
+                    <option value="2020/21">Stagione 2020/21</option>
+                    <option value="2019/20">Stagione 2019/20</option>
+                    <option value="2018/19">Stagione 2018/19</option>
+                    <option value="2017/18">Stagione 2017/18</option>
+                    <option value="2016/17">Stagione 2016/17</option>
+                    <option value="2015/16">Stagione 2015/16</option>
+            </select>
+<select id="matchweek">
+                        <option value="1">Giornata 1</option>
+                        <option value="2">Giornata 2</option>
+                        <option value="3" selected="">Giornata 3</option>
+                        <option value="4">Giornata 4</option>
+            </select>
+</div>
+<ul class="teams my-3">
+<li id="team-1" class="team-table">
+                <header>
+                            <div class="match-score">
+                                <span class="">Roma</span>
+                                <span class="">2</span>
+                                <span>-</span>
+                                <span class="current">1</span>
+                                <span class="current">Atalanta</span>
+                            </div>
+                        <div class="match-date ml-auto">
+                            05/09/2026 - 20:45
+                        </div>
+                </header>
+                <div class="team-table-body">
+                    <table class="grades-table">
+                        <thead>
+                            <tr>
+                                <th rowspan="3">
+                                    <div class="team-info">
+                                        <figure class="team-badge">
+
+
+<img class="team-badge" itemprop="logo" loading="lazy" width="48" height="48" src="https://content.fantacalcio.it/web/img/team/ico/atalanta2026_d.png" alt="Stemma Atalanta" title="Atalanta" onerror="this.classList.add('error');" onload="this.classList.remove('error');">
+
+     
+
+                                          </figure>
+                                            <a class="team-name team-link " href="https://www.fantacalcio.it/serie-a/squadre/atalanta" target="_self">
+        <meta itemprop="name" content="Atalanta">    
+        <meta itemprop="url" content="https://www.fantacalcio.it/serie-a/squadre/atalanta">
+        Atalanta
+    </a>
+
+
+                                    </div>
+                                </th>
+                                <th align="center"><small>Voto e Fantavoto</small></th>
+                                <th align="center"><small>Bonus e Malus</small></th>
+                            </tr>
+                            <tr>
+                                <th align="center">
+                                    <div class="group">
+                                        <img width="16" height="16" src="https://content.fantacalcio.it/fantacalcio/images/icons/whites/ico-fc.svg" importance="low" alt="Icona redazione fantacalcio" title="Redazione Fantacalcio">
+                                        <img width="16" height="16" src="https://content.fantacalcio.it/fantacalcio/images/icons/whites/ico-stats.svg" importance="low" alt="Icona voto statistico" title="Voto Statistico">
+                                        <img width="16" height="16" src="https://content.fantacalcio.it/fantacalcio/images/icons/whites/ico-italy.svg" importance="low" alt="Icona voto italia" title="Voto Italia">
+                                    </div>
+                                </th>
+                                <th align="center">
+                                    <img width="16" height="16" src="https://content.fantacalcio.it/fantacalcio/images/icons/whites/ico-fc.svg" importance="low" alt="Icona redazione fantacalcio" title="Redazione Fantacalcio">
+                                </th>
+                            </tr>
+                            <tr>
+                                <th>
+                                    <div class="group">
+                                        <div class="header pill">
+                                            <small>V</small>
+                                            <small>FV</small>
+                                        </div>
+                                        <div class="header pill">
+                                            <small>V</small>
+                                            <small>FV</small>
+                                        </div>
+                                        <div class="header pill">
+                                            <small>V</small>
+                                            <small>FV</small>
+                                        </div>
+                                    </div>
+                                </th>
+                                <th>
+                                    <div class="group">
+                                        <figure class="icon bonus-icon" data-key="scoredGoals" style="--icon-size:16" title="Gol segnati"></figure>
+                                        <figure class="icon bonus-icon" data-key="concededGoals" style="--icon-size:16" title="Gol subiti"></figure>
+                                        <figure class="icon bonus-icon" data-key="ownGoals" style="--icon-size:16" title="Autorete"></figure>
+                                        <figure class="icon bonus-icon" data-key="scoredPenalties" style="--icon-size:16" title="Rigori segnati"></figure>
+                                        <figure class="icon bonus-icon" data-key="missedPenalties" style="--icon-size:16" title="Rigori sbagliati"></figure>
+                                        <figure class="icon bonus-icon" data-key="savedPenalties" style="--icon-size:16" title="Rigori parati"></figure>
+                                        <figure class="icon bonus-icon" data-key="assists" style="--icon-size:16" title="Assists"></figure>
+                                        <figure class="icon bonus-icon" data-key="manOfTheMatch" style="--icon-size:16" title="Player of the match"></figure>
+                                    </div>
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                                <tr>
+                                    <td>
+                                        <div class="player-item cell">
+                                            <span class="role" data-value="p"></span>
+<a class="player-name player-link" href="https://www.fantacalcio.it/serie-a/squadre/atalanta/carnesecchi/4431" target="_self">
+    
+    <span>Carnesecchi</span>
+</a>                                          </div>
+                                    </td>
+                                    <td>
+                                        <div class="group">
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="7"></span>
+                                                <span class="player-fanta-grade" data-value="5"></span>
+                                            </div>
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="6,5"></span>
+                                                <span class="player-fanta-grade" data-value="4,5"></span>
+                                            </div>
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="6,5"></span>
+                                                <span class="player-fanta-grade" data-value="4,5"></span>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="group">
+                                            <span class="player-bonus cell bonus" data-value="0" title="Gol segnati"></span>
+                                            <span class="player-bonus cell malus" data-value="2" title="Gol subiti"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Autoreti"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Rigori segnati"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Rigori sbagliati"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Rigori parati"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Assist"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Player of the match"></span>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td>
+                                        <div class="player-item cell">
+                                            <span class="role" data-value="d"></span>
+<a class="player-name player-link" href="https://www.fantacalcio.it/serie-a/squadre/atalanta/zappacosta/554" target="_self">
+    
+    <span>Zappacosta</span>
+</a>                                                  <img class="player-icon icon" width="16" height="16" src="https://content.fantacalcio.it/fantacalcio/images/icons/bonus/in.webp" importance="low" alt="Icona subentrato" title="Subentrato">
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="group">
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="5,5"></span>
+                                                <span class="player-fanta-grade" data-value="5,5"></span>
+                                            </div>
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="6"></span>
+                                                <span class="player-fanta-grade" data-value="6"></span>
+                                            </div>
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="5,5"></span>
+                                                <span class="player-fanta-grade" data-value="5,5"></span>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="group">
+                                            <span class="player-bonus cell bonus" data-value="0" title="Gol segnati"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Gol subiti"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Autoreti"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Rigori segnati"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Rigori sbagliati"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Rigori parati"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Assist"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Player of the match"></span>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td>
+                                        <div class="player-item cell">
+                                            <span class="role" data-value="d"></span>
+<a class="player-name player-link" href="https://www.fantacalcio.it/serie-a/squadre/atalanta/kolasinac/2640" target="_self">
+    
+    <span>Kolasinac</span>
+</a>                                                  <img class="player-icon icon" width="16" height="16" src="https://content.fantacalcio.it/fantacalcio/images/icons/bonus/out.webp" importance="low" alt="Icona sostituito" title="Sostituito">
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="group">
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="6,5"></span>
+                                                <span class="player-fanta-grade" data-value="6,5"></span>
+                                            </div>
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="6"></span>
+                                                <span class="player-fanta-grade" data-value="6"></span>
+                                            </div>
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="6"></span>
+                                                <span class="player-fanta-grade" data-value="6"></span>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="group">
+                                            <span class="player-bonus cell bonus" data-value="0" title="Gol segnati"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Gol subiti"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Autoreti"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Rigori segnati"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Rigori sbagliati"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Rigori parati"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Assist"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Player of the match"></span>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td>
+                                        <div class="player-item cell">
+                                            <span class="role" data-value="d"></span>
+<a class="player-name player-link" href="https://www.fantacalcio.it/serie-a/squadre/atalanta/bellanova/4887" target="_self">
+    
+    <span>Bellanova</span>
+</a>                                          </div>
+                                    </td>
+                                    <td>
+                                        <div class="group">
+                                            <div class="pill">
+                                                <span class="player-grade yellow-card" data-value="5,5"></span>
+                                                <span class="player-fanta-grade" data-value="5"></span>
+                                            </div>
+                                            <div class="pill">
+                                                <span class="player-grade yellow-card" data-value="6"></span>
+                                                <span class="player-fanta-grade" data-value="5,5"></span>
+                                            </div>
+                                            <div class="pill">
+                                                <span class="player-grade yellow-card" data-value="6"></span>
+                                                <span class="player-fanta-grade" data-value="5,5"></span>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="group">
+                                            <span class="player-bonus cell bonus" data-value="0" title="Gol segnati"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Gol subiti"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Autoreti"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Rigori segnati"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Rigori sbagliati"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Rigori parati"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Assist"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Player of the match"></span>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td>
+                                        <div class="player-item cell">
+                                            <span class="role" data-value="d"></span>
+<a class="player-name player-link" href="https://www.fantacalcio.it/serie-a/squadre/atalanta/scalvini/5526" target="_self">
+    
+    <span>Scalvini</span>
+</a>                                          </div>
+                                    </td>
+                                    <td>
+                                        <div class="group">
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="6,5"></span>
+                                                <span class="player-fanta-grade" data-value="6,5"></span>
+                                            </div>
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="6"></span>
+                                                <span class="player-fanta-grade" data-value="6"></span>
+                                            </div>
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="6"></span>
+                                                <span class="player-fanta-grade" data-value="6"></span>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="group">
+                                            <span class="player-bonus cell bonus" data-value="0" title="Gol segnati"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Gol subiti"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Autoreti"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Rigori segnati"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Rigori sbagliati"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Rigori parati"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Assist"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Player of the match"></span>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td>
+                                        <div class="player-item cell">
+                                            <span class="role" data-value="d"></span>
+<a class="player-name player-link" href="https://www.fantacalcio.it/serie-a/squadre/atalanta/kossounou/5578" target="_self">
+    
+    <span>Kossounou</span>
+</a>                                          </div>
+                                    </td>
+                                    <td>
+                                        <div class="group">
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="5,5"></span>
+                                                <span class="player-fanta-grade" data-value="5,5"></span>
+                                            </div>
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="5,5"></span>
+                                                <span class="player-fanta-grade" data-value="5,5"></span>
+                                            </div>
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="5,5"></span>
+                                                <span class="player-fanta-grade" data-value="5,5"></span>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="group">
+                                            <span class="player-bonus cell bonus" data-value="0" title="Gol segnati"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Gol subiti"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Autoreti"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Rigori segnati"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Rigori sbagliati"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Rigori parati"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Assist"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Player of the match"></span>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td>
+                                        <div class="player-item cell">
+                                            <span class="role" data-value="c"></span>
+<a class="player-name player-link" href="https://www.fantacalcio.it/serie-a/squadre/atalanta/kessiè/1850" target="_self">
+    
+    <span>Kessiè</span>
+</a>                                                  <img class="player-icon icon" width="16" height="16" src="https://content.fantacalcio.it/fantacalcio/images/icons/bonus/in.webp" importance="low" alt="Icona subentrato" title="Subentrato">
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="group">
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="55"></span>
+                                                <span class="player-fanta-grade" data-value="55"></span>
+                                            </div>
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="6"></span>
+                                                <span class="player-fanta-grade" data-value="6"></span>
+                                            </div>
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="55"></span>
+                                                <span class="player-fanta-grade" data-value="55"></span>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="group">
+                                            <span class="player-bonus cell bonus" data-value="0" title="Gol segnati"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Gol subiti"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Autoreti"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Rigori segnati"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Rigori sbagliati"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Rigori parati"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Assist"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Player of the match"></span>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td>
+                                        <div class="player-item cell">
+                                            <span class="role" data-value="c"></span>
+<a class="player-name player-link" href="https://www.fantacalcio.it/serie-a/squadre/atalanta/pasalic/2077" target="_self">
+    
+    <span>Pasalic</span>
+</a>                                                  <img class="player-icon icon" width="16" height="16" src="https://content.fantacalcio.it/fantacalcio/images/icons/bonus/in.webp" importance="low" alt="Icona subentrato" title="Subentrato">
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="group">
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="5,5"></span>
+                                                <span class="player-fanta-grade" data-value="5,5"></span>
+                                            </div>
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="5,5"></span>
+                                                <span class="player-fanta-grade" data-value="5,5"></span>
+                                            </div>
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="5,5"></span>
+                                                <span class="player-fanta-grade" data-value="5,5"></span>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="group">
+                                            <span class="player-bonus cell bonus" data-value="0" title="Gol segnati"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Gol subiti"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Autoreti"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Rigori segnati"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Rigori sbagliati"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Rigori parati"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Assist"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Player of the match"></span>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td>
+                                        <div class="player-item cell">
+                                            <span class="role" data-value="c"></span>
+<a class="player-name player-link" href="https://www.fantacalcio.it/serie-a/squadre/atalanta/gaetano/4364" target="_self">
+    
+    <span>Gaetano</span>
+</a>                                          </div>
+                                    </td>
+                                    <td>
+                                        <div class="group">
+                                            <div class="pill">
+                                                <span class="player-grade red-card" data-value="5,5"></span>
+                                                <span class="player-fanta-grade" data-value="4,5"></span>
+                                            </div>
+                                            <div class="pill">
+                                                <span class="player-grade red-card" data-value="5,5"></span>
+                                                <span class="player-fanta-grade" data-value="4,5"></span>
+                                            </div>
+                                            <div class="pill">
+                                                <span class="player-grade red-card" data-value="5,5"></span>
+                                                <span class="player-fanta-grade" data-value="4,5"></span>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="group">
+                                            <span class="player-bonus cell bonus" data-value="0" title="Gol segnati"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Gol subiti"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Autoreti"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Rigori segnati"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Rigori sbagliati"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Rigori parati"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Assist"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Player of the match"></span>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td>
+                                        <div class="player-item cell">
+                                            <span class="role" data-value="c"></span>
+<a class="player-name player-link" href="https://www.fantacalcio.it/serie-a/squadre/atalanta/elmas/4479" target="_self">
+    
+    <span>Elmas</span>
+</a>                                                  <img class="player-icon icon" width="16" height="16" src="https://content.fantacalcio.it/fantacalcio/images/icons/bonus/out.webp" importance="low" alt="Icona sostituito" title="Sostituito">
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="group">
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="5,5"></span>
+                                                <span class="player-fanta-grade" data-value="5,5"></span>
+                                            </div>
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="5"></span>
+                                                <span class="player-fanta-grade" data-value="5"></span>
+                                            </div>
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="5,5"></span>
+                                                <span class="player-fanta-grade" data-value="5,5"></span>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="group">
+                                            <span class="player-bonus cell bonus" data-value="0" title="Gol segnati"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Gol subiti"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Autoreti"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Rigori segnati"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Rigori sbagliati"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Rigori parati"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Assist"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Player of the match"></span>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td>
+                                        <div class="player-item cell">
+                                            <span class="role" data-value="c"></span>
+<a class="player-name player-link" href="https://www.fantacalcio.it/serie-a/squadre/atalanta/samardzic/5119" target="_self">
+    
+    <span>Samardzic</span>
+</a>                                                  <img class="player-icon icon" width="16" height="16" src="https://content.fantacalcio.it/fantacalcio/images/icons/bonus/out.webp" importance="low" alt="Icona sostituito" title="Sostituito">
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="group">
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="6"></span>
+                                                <span class="player-fanta-grade" data-value="6"></span>
+                                            </div>
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="5,5"></span>
+                                                <span class="player-fanta-grade" data-value="5,5"></span>
+                                            </div>
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="5,5"></span>
+                                                <span class="player-fanta-grade" data-value="5,5"></span>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="group">
+                                            <span class="player-bonus cell bonus" data-value="0" title="Gol segnati"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Gol subiti"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Autoreti"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Rigori segnati"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Rigori sbagliati"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Rigori parati"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Assist"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Player of the match"></span>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td>
+                                        <div class="player-item cell">
+                                            <span class="role" data-value="c"></span>
+<a class="player-name player-link" href="https://www.fantacalcio.it/serie-a/squadre/atalanta/zalewski/5422" target="_self">
+    
+    <span>Zalewski</span>
+</a>                                                  <img class="player-icon icon" width="16" height="16" src="https://content.fantacalcio.it/fantacalcio/images/icons/bonus/in.webp" importance="low" alt="Icona subentrato" title="Subentrato">
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="group">
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="5,5"></span>
+                                                <span class="player-fanta-grade" data-value="5,5"></span>
+                                            </div>
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="5,5"></span>
+                                                <span class="player-fanta-grade" data-value="5,5"></span>
+                                            </div>
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="5,5"></span>
+                                                <span class="player-fanta-grade" data-value="5,5"></span>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="group">
+                                            <span class="player-bonus cell bonus" data-value="0" title="Gol segnati"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Gol subiti"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Autoreti"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Rigori segnati"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Rigori sbagliati"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Rigori parati"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Assist"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Player of the match"></span>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td>
+                                        <div class="player-item cell">
+                                            <span class="role" data-value="c"></span>
+<a class="player-name player-link" href="https://www.fantacalcio.it/serie-a/squadre/atalanta/ederson-d-s/5792" target="_self">
+    
+    <span>Ederson D.S.</span>
+</a>                                                  <img class="player-icon icon" width="16" height="16" src="https://content.fantacalcio.it/fantacalcio/images/icons/bonus/out.webp" importance="low" alt="Icona sostituito" title="Sostituito">
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="group">
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="7"></span>
+                                                <span class="player-fanta-grade" data-value="10"></span>
+                                            </div>
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="6,5"></span>
+                                                <span class="player-fanta-grade" data-value="9,5"></span>
+                                            </div>
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="6,5"></span>
+                                                <span class="player-fanta-grade" data-value="9,5"></span>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="group">
+                                            <span class="player-bonus cell bonus" data-value="1" title="Gol segnati"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Gol subiti"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Autoreti"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Rigori segnati"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Rigori sbagliati"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Rigori parati"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Assist"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Player of the match"></span>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td>
+                                        <div class="player-item cell">
+                                            <span class="role" data-value="a"></span>
+<a class="player-name player-link" href="https://www.fantacalcio.it/serie-a/squadre/atalanta/scamacca/2137" target="_self">
+    
+    <span>Scamacca</span>
+</a>                                                  <img class="player-icon icon" width="16" height="16" src="https://content.fantacalcio.it/fantacalcio/images/icons/bonus/out.webp" importance="low" alt="Icona sostituito" title="Sostituito">
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="group">
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="6"></span>
+                                                <span class="player-fanta-grade" data-value="6"></span>
+                                            </div>
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="5,5"></span>
+                                                <span class="player-fanta-grade" data-value="5,5"></span>
+                                            </div>
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="5,5"></span>
+                                                <span class="player-fanta-grade" data-value="5,5"></span>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="group">
+                                            <span class="player-bonus cell bonus" data-value="0" title="Gol segnati"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Gol subiti"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Autoreti"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Rigori segnati"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Rigori sbagliati"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Rigori parati"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Assist"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Player of the match"></span>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td>
+                                        <div class="player-item cell">
+                                            <span class="role" data-value="a"></span>
+<a class="player-name player-link" href="https://www.fantacalcio.it/serie-a/squadre/atalanta/de-ketelaere/5995" target="_self">
+    
+    <span>De Ketelaere</span>
+</a>                                          </div>
+                                    </td>
+                                    <td>
+                                        <div class="group">
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="6"></span>
+                                                <span class="player-fanta-grade" data-value="6"></span>
+                                            </div>
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="5,5"></span>
+                                                <span class="player-fanta-grade" data-value="5,5"></span>
+                                            </div>
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="6"></span>
+                                                <span class="player-fanta-grade" data-value="6"></span>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="group">
+                                            <span class="player-bonus cell bonus" data-value="0" title="Gol segnati"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Gol subiti"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Autoreti"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Rigori segnati"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Rigori sbagliati"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Rigori parati"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Assist"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Player of the match"></span>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td>
+                                        <div class="player-item cell">
+                                            <span class="role" data-value="a"></span>
+<a class="player-name player-link" href="https://www.fantacalcio.it/serie-a/squadre/atalanta/krstovic/6435" target="_self">
+    
+    <span>Krstovic</span>
+</a>                                                  <img class="player-icon icon" width="16" height="16" src="https://content.fantacalcio.it/fantacalcio/images/icons/bonus/in.webp" importance="low" alt="Icona subentrato" title="Subentrato">
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="group">
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="5"></span>
+                                                <span class="player-fanta-grade" data-value="5"></span>
+                                            </div>
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="5,5"></span>
+                                                <span class="player-fanta-grade" data-value="5,5"></span>
+                                            </div>
+                                            <div class="pill">
+                                                <span class="player-grade " data-value="5,5"></span>
+                                                <span class="player-fanta-grade" data-value="5,5"></span>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="group">
+                                            <span class="player-bonus cell bonus" data-value="0" title="Gol segnati"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Gol subiti"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Autoreti"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Rigori segnati"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Rigori sbagliati"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Rigori parati"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Assist"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Player of the match"></span>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td>
+                                        <div class="player-item cell">
+                                            <span class="role" data-value="all"></span>
+                                                <span class="player-name">Sarri</span>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="group">
+                                            <div class="pill">
+                                                <span class="player-grade yellow-card" data-value="5,5"></span>
+                                                <span class="player-fanta-grade" data-value="5"></span>
+                                            </div>
+                                            <div class="pill">
+                                                <span class="player-grade yellow-card" data-value="5,5"></span>
+                                                <span class="player-fanta-grade" data-value="5"></span>
+                                            </div>
+                                            <div class="pill">
+                                                <span class="player-grade yellow-card" data-value="5,5"></span>
+                                                <span class="player-fanta-grade" data-value="5"></span>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="group">
+                                            <span class="player-bonus cell bonus" data-value="0" title="Gol segnati"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Gol subiti"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Autoreti"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Rigori segnati"></span>
+                                            <span class="player-bonus cell malus" data-value="0" title="Rigori sbagliati"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Rigori parati"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Assist"></span>
+                                            <span class="player-bonus cell bonus" data-value="0" title="Player of the match"></span>
+                                        </div>
+                                    </td>
+                                </tr>
+
+                        </tbody>
+                    </table>
+                </div>
+                    <div class="fluid my-6">
+                        <div class="vidcar4s" id="vidcar4s-52309833" style="width: 100%; max-width: 640px; margin-bottom: 18px;"><div id="vidpl4s_52309833" style="width: 100%; max-width: 640px; display: inline-block; position: relative;"><div id="breaking-news-container_52309833" style="font-size: 12px; display: none;"></div><div id="dummy4s-52309833" style="margin-top: 56.25%;"></div><video id="player4s_52309833" tabindex="0" aria-label="Video content" playsinline="playsinline" preload="metadata" crossorigin="anonymous" disablepictureinpicture="" src="blob:https://www.fantacalcio.it/e424b761-75b1-4443-8f93-5be4c89ebc68" style="position: absolute; inset: 0px; width: 100%; height: 100%; background: black; opacity: 1; cursor: pointer;"><track kind="captions" default="true" src="https://videoplatform.sky.it/caption/2026/09/07/1122718_1788778965844.vtt"></video><a href="https://sport.sky.it/" rel="nofollow" target="_blank" tabindex="-1"></a><div class="_4sControlBarContainer" style="visibility: visible; opacity: 1; transition: visibility 2s, opacity 0.2s ease-in; height: 34px;"><div class="_4sControlBarProgress"><div class="_4sProgressRange" style="background: rgb(46, 199, 225); width: 58.8863%;"></div><div class="_4sProgressBuffered"></div><input type="range" min="0" max="136" step="1" id="_4sProgressDummy-52309833" class="_4sProgressDummy" aria-label="Bar progress" tabindex="-1"></div><div class="_4sControlsContainer _4sFlex" style="background: rgba(0, 0, 0, 0.2); display: flex; align-items: center; height: 31px;"><div style="display: flex; align-items: center;"><button class="_4sPlay _4sBtn" type="button" aria-label="Play" data-tooltip="Play (k)" tabindex="-1" style="background: none; outline: white;"></button><div class="_4sVolumeContainer _4sFlex "><button class="_4sVolume _4sBtn" type="button" aria-label="Volume range" tabindex="-1" style="background: none; width: 30px;" data-tooltip="Mute (m)"></button><div class="_4sVolumeRangeContainer _4sFlex _4sFull-height _4sRelative-position"><div class="_4sVolumeRange _4sCenter-volume-range" style="width: 5%; background: rgb(255, 255, 255);"></div><input type="range" min="0" max="10" step="0.1" id="_4sRangeDummy-52309833" class="_4sRangeDummy _4sCenter-range-dummy" aria-label="Volume control" tabindex="-1" style="width: 100%; position: absolute; z-index: 1; top: 0px; height: 100%; opacity: 0;"></div></div><div class="_4sTimer _4sFlex _4sFull-height" style="color: rgb(255, 255, 255); padding-left: 7px;"><span class="_4sCurrentTimer">1:20</span><span> / </span><span class="_4sDuration">2:16</span></div></div><div style="position: absolute; left: 47%; transform: translateX(-50%); display: flex; justify-content: center; margin-bottom: 30px;"><div class="_4sRewindForwardContainer _4sFlex"><button class="_4srewind _4sBtn" type="button" aria-label="Rewind button" tabindex="-1" data-tooltip="Rewind (arrow left)" style="background: none; outline: none;"></button><button class="_4sforward _4sBtn" type="button" aria-label="Forward button" tabindex="-1" data-tooltip="Forward (arrow right)" style="background: none; outline: none; margin-left: 35px;"></button></div></div><div style="display: flex; align-items: center;"><button class="_4sBtn" type="button" tabindex="-1" data-tooltip="Full screen (f)" style="outline: none; position: absolute; right: 9px; top: 11px; width: 18px; height: 18px;"><div style="display: flex; align-items: center; justify-content: center;"></div></button></div><button class="_4sBtn" type="button" aria-label="Subtitles/Closed Captions" data-tooltip="Subtitles/Closed Captions (c)" tabindex="-1" id="_4sClosedCaptions" style="outline: none; position: absolute; right: 25px; top: 4.5px;"><div hidden=""></div><div></div></button></div></div><div id="_4sTitleContainer-52309833" class="_4sTitleContainer" style="background: rgba(0, 0, 0, 0.7); visibility: visible; opacity: 1; transition: visibility 2s, opacity 0.2s ease-in;"><span id="_4sTitleDescContainer-52309833" class="_4sTitleDescContainer" style="font-family: Roboto, Arial, helvetica, sans-serif; color: rgb(255, 255, 255); line-height: 28px; padding: 0px 10px;">Serie A Women's Cup, il sorteggio delle due semifinali  </span></div><div id="div-gpt-ad-google-ima-player-52309833" style="position: absolute; inset: 0px; z-index: 2147483647; display: none;"><div style="position: absolute; width: 0px; height: 0px;"><div style="display: none;"><video title="Advertisement" webkit-playsinline="true" playsinline="true" style="background-color: rgb(0, 0, 0); height: 100%; width: 100%; position: absolute; left: 0px; top: 0px;"></video><div style="position: absolute; width: 100%; height: 100%; left: 0px; top: 0px;"></div></div><div style="display: none;"><video title="Advertisement" webkit-playsinline="true" playsinline="true" style="background-color: rgb(0, 0, 0); height: 100%; width: 100%; position: absolute; left: 0px; top: 0px;"></video><div style="position: absolute; width: 100%; height: 100%; left: 0px; top: 0px;"></div></div></div><button aria-label="toggle advertise volume" data-tooltip="Unmute (m)" tabindex="-1" style="position: absolute; overflow: visible; left: 36px; bottom: 29px; border-radius: 100%; padding: 2px; z-index: 1000; border-width: medium; border-style: none; border-color: currentcolor; border-image: none; background: transparent; cursor: pointer;"></button><button id="_4sRepositionFullscreenButton" type="button" style="display: none; top: -20px; left: 25px; position: absolute; z-index: 101; background: white; outline: none; border-width: medium; border-style: none; border-color: currentcolor; border-image: none; line-height: 13px; width: 17px; height: 17px; padding: 2px 0px; border-radius: 50%;"><div style="display: flex; align-items: center; justify-content: center;"></div></button><button class="_4sBtn" type="button" tabindex="-1" data-tooltip="Full screen (f)" style="outline: none; position: absolute; bottom: 0px; right: 7px; padding: 1px 0px 2px; z-index: 2147483647; margin-bottom: 7px; width: 18px; height: 18px; display: block;"><div style="display: flex; align-items: center; justify-content: center;"></div></button></div><img style="width: 100%; height: 100%; position: absolute; top:0; left: 0; z-index: 150; opacity: 0; display: none;"><button class="_4splayNext _4sBtn" type="button" aria-label="Play next video" tabindex="-1"></button><img id="_4sLogoImage52309833" src="https://videoplatform.sky.it/logo/1615907583252_png.png" alt="Sky logo" border="0" style="max-height: 25px; width: auto; position: absolute; top: 4px; right: 4px; z-index: 125;"></div><div id="vidcarpl4s_52309833" style="width: 100%; max-width: 640px; position: relative;"><div id="breaking-news-bottom-container_52309833" style="font-size: 12px; display: block;"></div><div id="owl-carousel_52309833" class="owl-carousel owl-theme owl-loaded owl-drag" style="display: none;"><div class="owl-stage-outer"><div class="owl-stage" style="transform: translate3d(0px, 0px, 0px); transition: all;"><div class="owl-item"><div value="https://acdn.ak-stream-videoplatform.sky.it/secure/hls/2026/09/07/1122718/master.m3u8?hdnts=st=1788983597~exp=1788983897~acl=/secure/hls/2026/09/07/1122718/*~hmac=b83a1d84bf497da83218ad516abe810f2887ad3b83063616501bcbdcba52d19e" role="button" aria-label="Playlist item" tabindex="0" data-position="1" style="cursor: pointer; border-width: medium; border-style: none; border-color: currentcolor; border-image: none;"><div style="display: inline-block; position: relative; overflow: hidden; margin: 0px; padding: 0px;"><img src="https://videoplatform.sky.it/captures/197/2026/09/07/1122718/1122718_1788779011753_thumb_197.0000001.jpg" aria-label="image picla" alt="image picla" loading="lazy" style="width: 100%; margin: 0px; padding: 0px;"><div class="caption4s" style="position: absolute; bottom: 0px; width: 100%; box-sizing: border-box; color: rgb(255, 255, 255); font-family: Roboto, Arial, helvetica, sans-serif;">Serie A Women's Cup, il sorteggio delle...</div></div></div></div><div class="owl-item"><div value="https://acdn.ak-stream-videoplatform.sky.it/hls/2026/09/11/1123851/master.m3u8" role="button" aria-label="Playlist item" tabindex="0" data-position="2" style="cursor: pointer;"><div style="display: inline-block; position: relative; overflow: hidden; margin: 0px; padding: 0px;"><img src="https://videoplatform.sky.it/captures/197/2026/09/11/1123851/1123851_1789137478125_thumb_197.0000001.jpg" aria-label="image picla" alt="image picla" loading="lazy" style="width: 100%; margin: 0px; padding: 0px;"><div class="caption4s" style="position: absolute; bottom: 0px; width: 100%; box-sizing: border-box; color: rgb(255, 255, 255); font-family: Roboto, Arial, helvetica, sans-serif;">X Factor 2026: Giacomo canta “Beautiful...</div></div></div></div><div class="owl-item"><div value="https://acdn.ak-stream-videoplatform.sky.it/secure/hls/2026/09/11/1123930/master.m3u8?hdnts=st=1789155741~exp=1789156041~acl=/secure/hls/2026/09/11/1123930/*~hmac=57f75d2004c184a8808ca6e0cec59ee2a516781b992b5bc6b03841873877171b" role="button" aria-label="Playlist item" tabindex="0" data-position="3" style="cursor: pointer;"><div style="display: inline-block; position: relative; overflow: hidden; margin: 0px; padding: 0px;"><img src="https://videoplatform.sky.it/captures/197/2026/09/11/1123930/1123930_1789155436678_thumb_197.0000001.jpg" aria-label="image picla" alt="image picla" loading="lazy" style="width: 100%; margin: 0px; padding: 0px;"><div class="caption4s" style="position: absolute; bottom: 0px; width: 100%; box-sizing: border-box; color: rgb(255, 255, 255); font-family: Roboto, Arial, helvetica, sans-serif;">Verstappen: "Stagione non positiva ma...</div></div></div></div><div class="owl-item"><div value="https://acdn.ak-stream-videoplatform.sky.it/secure/hls/2026/09/02/1121583/master.m3u8?hdnts=st=1788376340~exp=1788376640~acl=/secure/hls/2026/09/02/1121583/*~hmac=0d91ec15f50f3f4fbee28643a3dc0665082515ab11009e0aad3013d1fab891f6" role="button" aria-label="Playlist item" tabindex="0" data-position="4" style="cursor: pointer;"><div style="display: inline-block; position: relative; overflow: hidden; margin: 0px; padding: 0px;"><img src="https://videoplatform.sky.it/captures/197/2026/09/02/1121583/1121583_1788372819761_thumb_197.jpg" aria-label="image picla" alt="image picla" loading="lazy" style="width: 100%; margin: 0px; padding: 0px;"><div class="caption4s" style="position: absolute; bottom: 0px; width: 100%; box-sizing: border-box; color: rgb(255, 255, 255); font-family: Roboto, Arial, helvetica, sans-serif;">Medvedev-Gorzny: highlights US Open</div></div></div></div><div class="owl-item"><div value="https://acdn.ak-stream-videoplatform.sky.it/secure/hls/2026/09/06/1122593/master.m3u8?hdnts=st=1788964401~exp=1788964701~acl=/secure/hls/2026/09/06/1122593/*~hmac=9c603c15f2250b8970bd19a21df1a417268c1c85a3a028e5e82affe6c13a9d3d" role="button" aria-label="Playlist item" tabindex="0" data-position="5" style="cursor: pointer;"><div style="display: inline-block; position: relative; overflow: hidden; margin: 0px; padding: 0px;"><img src="https://videoplatform.sky.it/captures/197/2026/09/06/1122593/1122593_1788722713379_thumb_197.0000001.jpg" aria-label="image picla" alt="image picla" loading="lazy" style="width: 100%; margin: 0px; padding: 0px;"><div class="caption4s" style="position: absolute; bottom: 0px; width: 100%; box-sizing: border-box; color: rgb(255, 255, 255); font-family: Roboto, Arial, helvetica, sans-serif;">Eintracht-Augsburg 1-4: gol e...</div></div></div></div><div class="owl-item"><div value="https://acdn.ak-stream-videoplatform.sky.it/hls/2026/09/11/1123850/master.m3u8" role="button" aria-label="Playlist item" tabindex="0" data-position="6" style="cursor: pointer;"><div style="display: inline-block; position: relative; overflow: hidden; margin: 0px; padding: 0px;"><img src="https://videoplatform.sky.it/captures/197/2026/09/11/1123850/1123850_1789137417295_thumb_197.0000001.jpg" aria-label="image picla" alt="image picla" loading="lazy" style="width: 100%; margin: 0px; padding: 0px;"><div class="caption4s" style="position: absolute; bottom: 0px; width: 100%; box-sizing: border-box; color: rgb(255, 255, 255); font-family: Roboto, Arial, helvetica, sans-serif;">X Factor 2026: “Fammi un video” dei...</div></div></div></div><div class="owl-item"><div value="https://acdn.ak-stream-videoplatform.sky.it/secure/hls/2026/09/11/1123925/master.m3u8?hdnts=st=1789155743~exp=1789156043~acl=/secure/hls/2026/09/11/1123925/*~hmac=3b4095ff515cad635bfc010236ff0a51eb15df0b45e36e71356da5d57e42a275" role="button" aria-label="Playlist item" tabindex="0" data-position="7" style="cursor: pointer;"><div style="display: inline-block; position: relative; overflow: hidden; margin: 0px; padding: 0px;"><img src="https://videoplatform.sky.it/captures/197/2026/09/11/1123925/1123925_1789152284152_thumb_197.0000001.jpg" aria-label="image picla" alt="image picla" loading="lazy" style="width: 100%; margin: 0px; padding: 0px;"><div class="caption4s" style="position: absolute; bottom: 0px; width: 100%; box-sizing: border-box; color: rgb(255, 255, 255); font-family: Roboto, Arial, helvetica, sans-serif;">Gené: "In Ferrari tanta pressione,...</div></div></div></div><div class="owl-item"><div value="https://acdn.ak-stream-videoplatform.sky.it/secure/hls/2026/09/01/1121234/master.m3u8?hdnts=st=1789155868~exp=1789156168~acl=/secure/hls/2026/09/01/1121234/*~hmac=86194c91d83ae3df5c4ffb212159df2edd21b23845e1bba95ecbe8058c5ae123" role="button" aria-label="Playlist item" tabindex="0" data-position="8" style="cursor: pointer;"><div style="display: inline-block; position: relative; overflow: hidden; margin: 0px; padding: 0px;"><img src="https://videoplatform.sky.it/captures/197/2026/09/01/1121234/1121234_1788274313673_thumb_197.0000001.jpg" aria-label="image picla" alt="image picla" loading="lazy" style="width: 100%; margin: 0px; padding: 0px;"><div class="caption4s" style="position: absolute; bottom: 0px; width: 100%; box-sizing: border-box; color: rgb(255, 255, 255); font-family: Roboto, Arial, helvetica, sans-serif;">Wawrinka, addio e lacrime a New York:...</div></div></div></div><div class="owl-item"><div value="https://acdn.ak-stream-videoplatform.sky.it/secure/hls/2026/09/06/1122563/master.m3u8?hdnts=st=1788819787~exp=1788820087~acl=/secure/hls/2026/09/06/1122563/*~hmac=a43ea674d7e6905c6fee059a937cc383cf7e647254bd4ebe394889ce590633c3" role="button" aria-label="Playlist item" tabindex="0" data-position="9" style="cursor: pointer;"><div style="display: inline-block; position: relative; overflow: hidden; margin: 0px; padding: 0px;"><img src="https://videoplatform.sky.it/captures/197/2026/09/06/1122563/1122563_1788716855403_thumb_197.0000001.jpg" aria-label="image picla" alt="image picla" loading="lazy" style="width: 100%; margin: 0px; padding: 0px;"><div class="caption4s" style="position: absolute; bottom: 0px; width: 100%; box-sizing: border-box; color: rgb(255, 255, 255); font-family: Roboto, Arial, helvetica, sans-serif;">Arsenal-Chelsea 2-1: gol e highlights</div></div></div></div><div class="owl-item"><div value="https://acdn.ak-stream-videoplatform.sky.it/hls/2026/09/11/1123849/master.m3u8" role="button" aria-label="Playlist item" tabindex="0" data-position="10" style="cursor: pointer;"><div style="display: inline-block; position: relative; overflow: hidden; margin: 0px; padding: 0px;"><img src="https://videoplatform.sky.it/captures/197/2026/09/11/1123849/1123849_1789137381357_thumb_197.0000001.jpg" aria-label="image picla" alt="image picla" loading="lazy" style="width: 100%; margin: 0px; padding: 0px;"><div class="caption4s" style="position: absolute; bottom: 0px; width: 100%; box-sizing: border-box; color: rgb(255, 255, 255); font-family: Roboto, Arial, helvetica, sans-serif;">X Factor 2026: “Quelli Sbagliati” di...</div></div></div></div><div class="owl-item"><div value="https://acdn.ak-stream-videoplatform.sky.it/secure/hls/2026/09/11/1123922/master.m3u8?hdnts=st=1789155745~exp=1789156045~acl=/secure/hls/2026/09/11/1123922/*~hmac=2996b6cd5a8dd2e8e4d33e8cc4fb72e6e137dd75f8ccb3e8491c56749f6c8c97" role="button" aria-label="Playlist item" tabindex="0" data-position="11" style="cursor: pointer;"><div style="display: inline-block; position: relative; overflow: hidden; margin: 0px; padding: 0px;"><img src="https://videoplatform.sky.it/captures/197/2026/09/11/1123922/1123922_1789151295018_thumb_197.0000001.jpg" aria-label="image picla" alt="image picla" loading="lazy" style="width: 100%; margin: 0px; padding: 0px;"><div class="caption4s" style="position: absolute; bottom: 0px; width: 100%; box-sizing: border-box; color: rgb(255, 255, 255); font-family: Roboto, Arial, helvetica, sans-serif;">Russell: "Quanto degrado, ci vorrebbero...</div></div></div></div><div class="owl-item"><div value="https://acdn.ak-stream-videoplatform.sky.it/secure/hls/2026/08/31/1121034/master.m3u8?hdnts=st=1788272665~exp=1788272965~acl=/secure/hls/2026/08/31/1121034/*~hmac=27e9ad6fdfc49adac25821038a4c8c747353f4abcdd165549408730b0be83166" role="button" aria-label="Playlist item" tabindex="0" data-position="12" style="cursor: pointer;"><div style="display: inline-block; position: relative; overflow: hidden; margin: 0px; padding: 0px;"><img src="https://videoplatform.sky.it/captures/197/2026/08/31/1121034/1121034_1788164473410_thumb_197.0000001.jpg" aria-label="image picla" alt="image picla" loading="lazy" style="width: 100%; margin: 0px; padding: 0px;"><div class="caption4s" style="position: absolute; bottom: 0px; width: 100%; box-sizing: border-box; color: rgb(255, 255, 255); font-family: Roboto, Arial, helvetica, sans-serif;">V. Williams-Kenin: highlights US Open</div></div></div></div></div></div><div class="owl-nav"><div class="owl-prev disabled" role="button">&lt;</div><div class="owl-next" role="button">&gt;</div></div><div class="owl-dots disabled"></div></div><img src="https://cdnb.4strokemedia.com/carousel/images/fluid-s.png" id="_4sFluidLogo-52309833" alt="Fluid logo" style="position: absolute; z-index: 100; bottom: -24px; right: 5px; width: initial; height: 18px !important;"></div></div><ins data-fluid-zoneid="17820" data-fluid-id="e6404a5432b1988ea2e71ec092e8608a" data-fluid-seq="0" id="revive-1-0" data-fluid-loaded="1"></ins>
+
+                    </div>
+            </li>
+</ul>
+</body></html>

@@ -17,3 +17,4 @@ export * from './calendario.js';
 export * from './calendario-prova.js';
 export * from './collectors/robots.js';
 export * from './collectors/html-json.js';
+export * from './collectors/dom-tabella.js';

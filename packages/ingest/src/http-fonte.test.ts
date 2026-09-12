@@ -1,4 +1,7 @@
 import { createServer, type Server } from 'node:http';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AdapterError } from './adapter.js';
 import {
@@ -8,6 +11,7 @@ import { importFromRelay } from './collectors/relay-import.js';
 import { jsonDentroHtml, scegliBlocco } from './collectors/html-json.js';
 import { applyMapping } from './collectors/extension-relay.js';
 import { PROFILO_PROVA } from './profiles.js';
+import { profiloFantacalcioIt } from './profili-fonte.js';
 import { DEFAULT_RULESET } from '@fantacomics/core';
 import { generateWorld, withOfficialScores } from './synthetic.js';
 import { payloadPortaleDiProva } from './synthetic-portal.js';
@@ -653,5 +657,71 @@ describe('i voti presi da una pagina, una volta per tutti', () => {
       profilo: ProfiloFonteSchema.parse(PROFILO_SITO), attesa: subito, fetchImpl: impl,
     });
     await expect(fonte.payload('globale', CTX)).rejects.toThrow(/ispeziona-fonte/);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Il cancello sulla giornata dichiarata dalla pagina.                  */
+/* ------------------------------------------------------------------ */
+
+describe('una pagina che pubblica «la giornata corrente»', () => {
+  /**
+   * E' il caso della testata vera: nessun parametro per chiedere una giornata
+   * precisa, quindi l'indirizzo e' fisso e il contenuto cambia da solo. Letta
+   * in ritardo — un guasto, un posticipo, un cron fermo un giorno — quella
+   * pagina restituisce la settimana DOPO.
+   *
+   * E' il difetto peggiore che questo progetto possa avere, perche' non
+   * assomiglia a un guasto: i voti sarebbero coerenti, i conti tornerebbero, e
+   * il giornale della terza giornata racconterebbe la quarta. Nessun controllo
+   * a valle puo' accorgersene. Per questo la pagina deve dichiarare la propria
+   * giornata, e per questo il disallineamento e' un errore.
+   */
+  const pagina = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), '__fixtures__', 'voti-pagina.html'),
+    'utf8',
+  );
+  let servitore: Server;
+  let indirizzo = '';
+
+  beforeAll(async () => {
+    servitore = createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(pagina);
+    });
+    await new Promise<void>((ok) => servitore.listen(0, '127.0.0.1', ok));
+    indirizzo = `http://127.0.0.1:${(servitore.address() as { port: number }).port}`;
+  });
+  afterAll(() => { servitore.close(); });
+
+  /** Il profilo vero, puntato al servitore locale invece che al sito. */
+  function locale(): ProfiloFonte {
+    const vero = profiloFantacalcioIt();
+    return ProfiloFonteSchema.parse({
+      ...vero, baseUrl: indirizzo, rispettaRobots: false, attesaMinimaMs: 0,
+    });
+  }
+
+  it('con la giornata giusta i voti arrivano', async () => {
+    const fonte = new FonteHttp({ profilo: locale(), attesa: subito });
+    const righe = await fonte.payloadDi('voti', { matchday: 3, season: '2026-27' });
+    expect(Array.isArray(righe)).toBe(true);
+    expect(righe as unknown[]).toHaveLength(16);
+  });
+
+  it('con un\'altra giornata la pagina viene RIFIUTATA, non usata', async () => {
+    const fonte = new FonteHttp({ profilo: locale(), attesa: subito });
+    await expect(fonte.payloadDi('voti', { matchday: 4, season: '2026-27' }))
+      .rejects.toThrow(/giornata 4 e la pagina.*pubblica la 3/s);
+  });
+
+  it('e il rifiuto non e\' riprovabile: rileggere non cambia la settimana', async () => {
+    // Riprovare avrebbe senso su un guasto di rete. Qui la pagina e' arrivata
+    // benissimo: e' la giornata chiesta che non e' quella pubblicata, e la
+    // decisione spetta alla macchina a stati, non a un secondo tentativo.
+    const fonte = new FonteHttp({ profilo: locale(), attesa: subito, tentativi: 3 });
+    const prima = fonte.stato.richieste;
+    await fonte.payloadDi('voti', { matchday: 4, season: '2026-27' }).catch(() => undefined);
+    expect(fonte.stato.richieste - prima).toBe(1);
   });
 });

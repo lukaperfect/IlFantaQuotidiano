@@ -3,6 +3,7 @@ import { AdapterError } from '../adapter.js';
 import { FieldMappingSchema } from './extension-relay.js';
 import { scaricaRobots, consentito, type Robots } from './robots.js';
 import { jsonDentroHtml, scegliBlocco } from './html-json.js';
+import { estraiDaDom, SelettoriDomSchema } from './dom-tabella.js';
 import { importFromRelay } from './relay-import.js';
 
 /**
@@ -63,7 +64,30 @@ export const EndpointSchema = z.object({
    * Sta sull'ENDPOINT e non sulla fonte perche' un profilo puo' benissimo
    * prendere una cosa da un'API e un'altra da una pagina.
    */
-  estrazione: z.enum(['json', 'json-in-html']).default('json'),
+  estrazione: z.enum(['json', 'json-in-html', 'dom']).default('json'),
+  /**
+   * I selettori, quando i dati stanno nel documento e non in un JSON.
+   *
+   * E' il caso di un sito che le sue pagine le compone sul server: non c'e'
+   * nessuna risposta da intercettare, e l'alternativa a questo sarebbe
+   * conoscenza di quel sito scritta nel codice — cioe' un rilascio a ogni
+   * ritocco del loro HTML.
+   */
+  selettori: SelettoriDomSchema.optional(),
+  /**
+   * Il nome del campo che porta la giornata DICHIARATA dalla pagina.
+   *
+   * Esiste per i siti che pubblicano «la giornata corrente» a un indirizzo
+   * fisso, senza un parametro per chiederne una precisa. Letti in ritardo —
+   * un guasto del fornitore, un posticipo, un cron fermo un giorno — quegli
+   * indirizzi restituiscono la giornata DOPO, e i suoi voti finirebbero nel
+   * giornale di quella prima con tutti i numeri giusti e tutti sbagliati.
+   *
+   * Con questo campo il disallineamento diventa un errore dichiarato. Senza,
+   * resterebbe invisibile: nessun controllo a valle puo' accorgersene, perche'
+   * i dati sono internamente coerenti — sono solo di un'altra settimana.
+   */
+  campoGiornata: z.string().optional(),
   /**
    * Quale blocco JSON prendere dentro la pagina, per id (`__NEXT_DATA__` e
    * simili). Senza, si prende il piu' grande — che e' un'euristica, e quando
@@ -437,7 +461,7 @@ export class FonteHttp {
           if (!errore.retryable) throw errore;
           ultimo = errore;
         } else {
-          const grezzo = await this.leggiCorpo(risposta, id, endpoint);
+          const grezzo = await this.leggiCorpo(risposta, id, endpoint, ctx);
           const tag = risposta.headers.get('etag');
           if (tag) { this.etag.set(chiaveCache, tag); this.ultimoCorpo.set(chiaveCache, grezzo); }
           return grezzo;
@@ -470,7 +494,9 @@ export class FonteHttp {
     );
   }
 
-  private async leggiCorpo(risposta: Response, id: string, endpoint: Endpoint): Promise<unknown> {
+  private async leggiCorpo(
+    risposta: Response, id: string, endpoint: Endpoint, ctx: Contesto,
+  ): Promise<unknown> {
     const lunghezza = Number(risposta.headers.get('content-length') ?? '0');
     if (lunghezza > MAX_BYTE_RISPOSTA) {
       throw new AdapterError(
@@ -482,6 +508,54 @@ export class FonteHttp {
       throw new AdapterError(
         `La risposta per "${id}" supera il limite consentito.`, 'parse', false,
       );
+    }
+
+    if (endpoint.estrazione === 'dom') {
+      if (!endpoint.selettori) {
+        throw new AdapterError(
+          `L'endpoint "${id}" dichiara estrazione "dom" ma non ha selettori.`,
+          'parse', false,
+        );
+      }
+      const righe = estraiDaDom(testo, endpoint.selettori);
+      if (endpoint.campoGiornata !== undefined) {
+        const dichiarate = new Set(righe.map((r) => r[endpoint.campoGiornata as string]));
+        if (dichiarate.size > 1) {
+          throw new AdapterError(
+            `La pagina di "${id}" dichiara piu' giornate insieme (${[...dichiarate].join(', ')}): `
+            + 'non e\' una giornata sola e non si puo\' attribuire.',
+            'parse', false,
+          );
+        }
+        const [dichiarata] = [...dichiarate];
+        if (Number(dichiarata) !== ctx.matchday) {
+          /**
+           * NON si riprova: la pagina non cambiera' contenuto fra un tentativo
+           * e l'altro. E' la giornata chiesta che non e' quella pubblicata, e la
+           * decisione spetta alla macchina a stati, non a un altro tentativo.
+           */
+          throw new AdapterError(
+            `Ho chiesto la giornata ${ctx.matchday} e la pagina di "${id}" pubblica la `
+            + `${dichiarata ?? '(non dichiarata)'}. Non la uso: i voti di una giornata nel `
+            + 'giornale di un\'altra sono numeri giusti attribuiti alla settimana sbagliata.',
+            'parse', false,
+          );
+        }
+      }
+      if (righe.length === 0) {
+        /**
+         * Zero righe non e' un elenco vuoto: e' un selettore che non trova
+         * piu' niente. Restituirlo come "nessun dato" farebbe concludere alla
+         * macchina a stati che la giornata non e' cominciata, e il giornale
+         * non uscirebbe MAI senza che niente segnali un guasto.
+         */
+        throw new AdapterError(
+          `I selettori di "${id}" non hanno trovato nessuna riga (${endpoint.selettori.riga}). `
+          + 'Probabile che la pagina sia cambiata: va riletta e il profilo aggiornato.',
+          'parse', false,
+        );
+      }
+      return righe;
     }
 
     if (endpoint.estrazione === 'json-in-html') {

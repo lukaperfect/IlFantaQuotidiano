@@ -36,6 +36,200 @@ import { ProfiloFonteSchema, type ProfiloFonte } from './collectors/http-fonte.j
  */
 
 /**
+ * IL PROFILO DELLA TESTATA CHE PUBBLICA I VOTI.
+ *
+ * Non e' un fornitore: e' un sito che si legge. La decisione e' commerciale e
+ * sta a chi possiede il prodotto; qui c'e' solo il come, fatto nel modo meno
+ * invasivo possibile — ci si presenta con un contatto, si rispetta il
+ * robots.txt, e si legge UNA pagina per giornata per tutte le leghe insieme.
+ *
+ * PERCHE' NON C'E' LA GIORNATA NELL'INDIRIZZO. Perche' su quel sito non
+ * esiste: i menu di giornata sono guidati da JavaScript e l'indirizzo resta
+ * lo stesso. Si legge quindi «la giornata corrente», e siccome leggere la
+ * settimana sbagliata e' il difetto che nessun controllo a valle puo'
+ * scoprire — i numeri sarebbero coerenti, solo di un'altra settimana — la
+ * pagina deve DICHIARARE la propria giornata (`campoGiornata`) e viene
+ * rifiutata se non e' quella chiesta. Non e' una limitazione da aggirare: e'
+ * il momento in cui il disallineamento diventa visibile.
+ *
+ * DUE ENDPOINT SULLA STESSA PAGINA, QUINDI DUE LETTURE. Lo si e' accettato
+ * invece di introdurre una cache per indirizzo: due letture per giornata sono
+ * poca cosa, mentre intrecciare quella cache con la gestione del 304 e degli
+ * ETag — che regge la macchina a stati — si paga con un rischio sproporzionato
+ * al risparmio.
+ *
+ * I NOMI DEI CAMPI E I SELETTORI SONO STATI LETTI, NON INDOVINATI: vengono da
+ * una pagina vera, di cui un ritaglio sta in `__fixtures__/voti-pagina.html` e
+ * su cui girano i test. La prova che la lettura e' giusta e non solo
+ * plausibile e' aritmetica: ricalcolando il fantavoto da voto e bonus con la
+ * tabella standard, tornava su 285 giocatori su 285.
+ */
+export function profiloFantacalcioIt(): ProfiloFonte {
+  /** Un bonus o un malus, letti dalla cella col titolo che il sito gli da'. */
+  const bonus = (titolo: string) => ({
+    selettore: `span.player-bonus[title="${titolo}"]`,
+    da: 'attributo' as const, attributo: 'data-value', numero: true,
+  });
+
+  /**
+   * Il cartellino sta nella CLASSE del voto, non in una colonna. Si traduce in
+   * un contatore perche' i campi canonici contano i cartellini, e la cella
+   * vuota significa «nessuno» — distinto da zero, che non vorrebbe dire nulla.
+   */
+  const cartellino = (quale: 'yellow-card' | 'red-card') => ({
+    selettore: 'span.player-grade', indice: 0, da: 'classe' as const,
+    estrai: `(${quale})`, mappa: { [quale]: '1' },
+  });
+
+  return ProfiloFonteSchema.parse({
+    fonte: 'fantacalcio-it',
+    version: 1,
+    baseUrl: 'https://www.fantacalcio.it',
+    identificazione: {
+      prodotto: 'FantaComics',
+      versione: '1.0',
+      contatto: 'https://fantacomics.it/bot',
+    },
+    // Si legge una pagina per giornata: l'attesa fra le richieste e' ampia
+    // perche' non c'e' nessuna fretta e la cortesia costa zero.
+    attesaMinimaMs: 2000,
+    endpoints: {
+      voti: {
+        percorso: '/voti-fantacalcio-serie-a',
+        piano: 'globale',
+        estrazione: 'dom',
+        campoGiornata: 'giornata',
+        selettori: {
+          documento: {
+            giornata: {
+              selettore: 'select#matchweek option[selected]',
+              da: 'attributo', attributo: 'value', numero: true,
+            },
+          },
+          gruppo: {
+            selettore: 'li.team-table',
+            campi: { squadra: { selettore: 'a.team-name' } },
+          },
+          // `:has` esclude la riga dell'allenatore: prende un voto ma in una
+          // rosa di fantacalcio non c'e', e un identificatore non ce l'ha.
+          riga: 'tbody tr:has(a.player-name)',
+          campi: {
+            idGiocatore: {
+              selettore: 'a.player-name', da: 'attributo', attributo: 'href',
+              estrai: '/(\\d+)$',
+            },
+            nome: { selettore: 'a.player-name' },
+            ruolo: {
+              selettore: 'span.role', da: 'attributo', attributo: 'data-value',
+              mappa: { p: 'P', d: 'D', c: 'C', a: 'A' },
+            },
+            /**
+             * Il voto della redazione, che e' la prima delle tre colonne. Le
+             * altre due — statistico e «Italia» — restano disponibili come
+             * indice 1 e 2: quale faccia fede e' una scelta della lega, cioe'
+             * un dato di questo profilo, non del codice.
+             *
+             * `55` NON e' 5,5: e' «senza voto». La prova sta nei giocatori
+             * ammoniti che hanno 55: il giallo non toglie mezzo punto perche'
+             * non c'e' voto a cui toglierlo, mentre lo toglie in tutti gli
+             * altri 285 casi.
+             */
+            voto: {
+              selettore: 'span.player-grade', indice: 0,
+              da: 'attributo', attributo: 'data-value', vuotoSe: ['55'], numero: true,
+            },
+            fantavoto: {
+              selettore: 'span.player-fanta-grade', indice: 0,
+              da: 'attributo', attributo: 'data-value', vuotoSe: ['55'], numero: true,
+            },
+            ammonizione: cartellino('yellow-card'),
+            espulsione: cartellino('red-card'),
+            gol: bonus('Gol segnati'),
+            golSubiti: bonus('Gol subiti'),
+            autoreti: bonus('Autoreti'),
+            rigoriSegnati: bonus('Rigori segnati'),
+            rigoriSbagliati: bonus('Rigori sbagliati'),
+            rigoriParati: bonus('Rigori parati'),
+            assist: bonus('Assist'),
+          },
+        },
+      },
+      /**
+       * GLI ORARI, dalla stessa pagina. Sono quelli che decidono quale dei due
+       * numeri della settimana e' dovuto, e senza di loro la vigilia non
+       * uscirebbe da sola.
+       *
+       * Una riga per PARTITA e non per squadra: ogni incontro compare in due
+       * tabelle, e prenderle entrambe darebbe venti partite dove ce ne sono
+       * dieci. Si tengono le tabelle in cui la squadra di casa e' quella della
+       * tabella, che il sito marca con `current` sul primo nome.
+       */
+      partite: {
+        percorso: '/voti-fantacalcio-serie-a',
+        piano: 'globale',
+        facoltativo: true,
+        estrazione: 'dom',
+        campoGiornata: 'giornata',
+        selettori: {
+          documento: {
+            giornata: {
+              selettore: 'select#matchweek option[selected]',
+              da: 'attributo', attributo: 'value', numero: true,
+            },
+          },
+          riga: 'li.team-table:has(.match-score span:first-child.current)',
+          campi: {
+            casa: { selettore: '.match-score span', indice: 0 },
+            trasferta: { selettore: '.match-score span', indice: 4 },
+            /**
+             * «05/09/2026 - 20:45» va ricomposto e ancorato a un fuso. Dato a
+             * un parser cosi' com'e' diventerebbe il 9 maggio in mezzo mondo —
+             * e il 9 maggio e' una data valida, quindi passerebbe.
+             */
+            inizio: {
+              selettore: '.match-date',
+              estrai: '(\\d{2})/(\\d{2})/(\\d{4}) - (\\d{2}):(\\d{2})',
+              componi: '$3-$2-$1T$4:$5',
+              fuso: 'Europe/Rome',
+            },
+          },
+        },
+      },
+    },
+    /**
+     * `root: "$"` perche' l'estrazione dal DOM restituisce gia' l'elenco delle
+     * righe: non c'e' nessun involucro da attraversare.
+     *
+     * Cio' che NON c'e' e' dichiarato dalla sua assenza: i MINUTI giocati. La
+     * pagina non li pubblica. Non e' un buco che pesa, ed e' stato verificato
+     * invece che sperato: il motore decide le sostituzioni automatiche su
+     * «senza voto», e la macchina a stati riconosce una giornata finita dal
+     * fatto che ogni squadra scesa in campo ha dei voti — nessuno dei due
+     * guarda i minuti.
+     */
+    mappings: {
+      voti: {
+        version: 1,
+        root: '$',
+        fields: {
+          playerId: 'idGiocatore', playerName: 'nome', role: 'ruolo',
+          serieATeam: 'squadra', vote: 'voto', officialFantaVote: 'fantavoto',
+          goals: 'gol', goalsConceded: 'golSubiti', ownGoals: 'autoreti',
+          penaltiesScored: 'rigoriSegnati', penaltiesMissed: 'rigoriSbagliati',
+          penaltiesSaved: 'rigoriParati', assists: 'assist',
+          yellowCards: 'ammonizione', redCards: 'espulsione',
+        },
+      },
+      partite: {
+        version: 1,
+        root: '$',
+        fields: { kickoff: 'inizio', homeTeam: 'casa', awayTeam: 'trasferta' },
+      },
+    },
+  });
+}
+
+/**
  * Il profilo del servizio di prova che accompagna la verifica end-to-end.
  * URL e nomi dei campi sono quelli che controllo io: e' il banco di prova
  * della catena, non un fornitore vero.
@@ -198,6 +392,7 @@ export function profiloFonte(
   const dallAmbiente = configurati[nome];
   if (dallAmbiente) return dallAmbiente;
 
+  if (nome === 'fantacalcio-it') return profiloFantacalcioIt();
   if (nome === 'servizio-di-prova' && baseUrl) return profiloServizioDiProva(baseUrl);
   return null;
 }
