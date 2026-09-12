@@ -1,4 +1,4 @@
-import { signingSecret, usingDevSecret } from '@fantacomics/auth';
+import { signingSecret, usingDevSecret, configSmtpDaAmbiente } from '@fantacomics/auth';
 
 /**
  * Verifica di avvio.
@@ -23,6 +23,41 @@ export async function register(): Promise<void> {
     console.warn(
       '[FantaComics] FANTACOMICS_URL non impostata: i magic link e le immagini ' +
       'di anteprima useranno http://localhost:3000.',
+    );
+  }
+
+  /**
+   * LA POSTA SI CONTROLLA ALL'AVVIO, non al primo accesso.
+   *
+   * Senza un mailer vero il magic link finisce su un file o su un log, e
+   * l'utente vede «ti abbiamo mandato una mail» e non riceve niente. Non e' un
+   * errore che qualcuno segnala: e' un utente che non torna. In produzione
+   * quindi l'app NON parte, come per il segreto di firma — e non parte
+   * nemmeno se le credenziali SMTP sono sbagliate, perche' scoprirlo al primo
+   * accesso di un utente vero e' il momento peggiore per scoprirlo.
+   */
+  const smtp = configSmtpDaAmbiente();
+  if (process.env.NODE_ENV === 'production' && !smtp) {
+    throw new Error(
+      '[FantaComics] Nessuna posta configurata: i magic link non verrebbero ' +
+      'spediti. Imposta SMTP_HOST, SMTP_USER, SMTP_PASSWORD e SMTP_FROM.',
+    );
+  }
+  if (smtp) {
+    const { SmtpMailer } = await import('@fantacomics/auth');
+    try {
+      await new SmtpMailer(smtp).verifica();
+      console.log(`[FantaComics] Posta via ${smtp.host}:${smtp.porta}, mittente ${smtp.mittente}.`);
+    } catch (e) {
+      throw new Error(
+        `[FantaComics] SMTP non raggiungibile o credenziali rifiutate (${smtp.host}:${smtp.porta}): ` +
+        `${e instanceof Error ? e.message : 'errore sconosciuto'}`,
+      );
+    }
+  } else {
+    console.warn(
+      '[FantaComics] Nessuna posta configurata: i magic link restano nei log. ' +
+      'Va bene in sviluppo, non con utenti veri.',
     );
   }
 

@@ -34,7 +34,7 @@ Da qui tre inversioni che governano tutto il codice:
 
 ```bash
 pnpm install
-pnpm test                                   # 576 test (563 senza database)
+pnpm test                                   # 591 test (578 senza database)
 pnpm demo -- --out out --giornate 6         # una stagione simulata end-to-end
 pnpm demo -- --out out --giornate 4 --assets   # aggiunge PDF A3 e un campione di card in PNG
 
@@ -850,6 +850,61 @@ ricalcolando il fantavoto da voto e bonus con la tabella standard — gol +3,
 assist +1, rigore parato +3, autorete −2, gol subito −1, giallo −0,5, rosso −1 —
 **torna su 285 giocatori su 285**.
 
+## La posta
+
+Finche' esistevano solo il mailer su console e quello su file, il magic link si
+conosceva solo leggendo i log del server: l'app si poteva provare, non si poteva
+aprire a nessuno.
+
+**SMTP e non l'API di un fornitore.** SMTP lo parlano tutti — la casella che si
+ha gia', il proprio dominio, e anche i servizi transazionali, che offrono tutti
+un accesso SMTP oltre alla loro API. Scegliere l'API di uno significherebbe
+sceglierlo per conto di chi possiede il prodotto, e cambiarlo diventerebbe un
+rilascio invece di una variabile d'ambiente. Il limite va detto invece che
+scoperto: alcune piattaforme serverless chiudono le porte SMTP in uscita; se
+succede la strada e' un mailer HTTP accanto a questo, e il resto del codice non
+se ne accorge.
+
+**Il mittente e' separato dall'utente SMTP**, perche' quasi mai coincidono: ci
+si autentica come `apikey` e si spedisce da `noreply@dominio`. Scambiarli non
+da' un errore — da' una consegna che finisce nello spam, cioe' un accesso che
+«non arriva» senza che niente risulti rotto. Il TLS si deduce dalla porta (465
+diretto, 587 con STARTTLS), che e' la domanda che tutti sbagliano e la cui
+risposta e' sempre la stessa.
+
+**In produzione l'app non parte senza posta**, e non parte nemmeno se le
+credenziali sono rifiutate: si prova la connessione all'avvio, quando qualcuno
+sta guardando. Un magic link che finisce in un file mentre l'utente legge «ti
+abbiamo mandato una mail» non e' un errore che qualcuno segnala: e' un utente
+che non torna.
+
+### La garanzia si verifica, non si aggira
+
+Quella regola ha rotto subito tutte le verifiche end-to-end, perche'
+`next start` gira sempre con `NODE_ENV=production` e li' la posta non c'era. Le
+strade erano due: un'eccezione per le verifiche, o dare alle verifiche una
+posta vera. La prima avrebbe reso la garanzia una decorazione — il caso che
+deve impedire e' esattamente quello che l'eccezione riapriva.
+
+Quindi `posta-finta.ts`: un server che parla SMTP davvero e scrive cio' che
+riceve nello stesso registro del `FileMailer`. Le verifiche che leggevano di
+li' continuano a leggere di li', e adesso lo fanno **attraverso una
+conversazione SMTP** invece di scavalcarla. Il percorso della posta e' passato
+da «mai verificato» a «verificato a ogni giro», ed e' lo STESSO server che usa
+il test del mailer: una copia proverebbe il mailer contro un interlocutore
+diverso da quello con cui poi gira.
+
+Due difetti trovati cosi', non rileggendo il codice:
+
+- il quoted-printable si decodificava un carattere alla volta. Una lettera
+  accentata in UTF-8 sono due byte — `é` e' `=C3=A9` — e presi separatamente
+  diventano «Ã©». Sui magic link, che sono ASCII, non si vedeva; su ogni
+  oggetto in italiano si'
+- la riga d'avvio della posta finta non compariva nel log, perche' Node
+  bufferizza stdout quando non e' un terminale. Il controllo che in CI verifica
+  che la posta sia partita avrebbe dato un falso guasto. E' lo stesso motivo
+  per cui il `FileMailer` scrive sincrono, ed e' costato un giro riscoprirlo
+
 ## Il pagamento
 
 4,99 € **una tantum per lega e per stagione**. Non un abbonamento: chi gioca al
@@ -938,9 +993,11 @@ Per andare in produzione servono, nell'ordine:
    raggiunge, su una giornata finita, guardando che la riconciliazione torni.
    Il piano della LEGA — chi ha schierato chi — non sta li' e resta
    all'estensione: non e' dato di quel sito, e' dato privato dell'utente.
-3. **Un provider di posta vero**: il `Mailer` è un'interfaccia con
-   implementazioni su console e su file. Serve collegarci un servizio prima di
-   far accedere qualcuno che non sia sulla stessa macchina.
+3. **Le credenziali SMTP.** Il mailer c'e' ed e' verificato contro un server
+   SMTP vero; manca la casella da cui spedire — `SMTP_HOST`, `SMTP_USER`,
+   `SMTP_PASSWORD`, `SMTP_FROM`. Va bene qualunque fornitore, compresa la
+   propria casella: e' configurazione, non codice. Senza, in produzione l'app
+   **non parte**, apposta.
 4. **Consegna**: bot Telegram per l'automazione, PWA con Web Share API per la
    condivisione su WhatsApp (l'API di WhatsApp non scrive nei gruppi: qualsiasi
    piano che lo assuma è irrealizzabile).

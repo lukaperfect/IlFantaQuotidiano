@@ -7,7 +7,7 @@ import { DEFAULT_RULESET, LeagueRulesetSchema, safeName, stableHash } from '@fan
 import type { EditionKind } from '@fantacomics/core';
 import {
   issueMagicLink, consumeMagicLink, ConsoleMailer, FileMailer, randomToken,
-  MAGIC_LINK_TTL_MS, type Mailer,
+  SmtpMailer, configSmtpDaAmbiente, MAGIC_LINK_TTL_MS, type Mailer,
 } from '@fantacomics/auth';
 import { authStore } from '@/lib/store';
 import { requireAccount, startSession, NONCE_COOKIE } from '@/lib/session';
@@ -36,11 +36,21 @@ function baseUrl(): string {
 }
 
 /**
- * In produzione qui va un provider vero. Il mailer su file esiste per lo
- * sviluppo e per i test di flusso, dove serve poter leggere cio' che e'
- * stato "spedito" senza dipendere da un servizio esterno.
+ * Quale posta si usa, in ordine di precedenza.
+ *
+ * SMTP quando e' configurato, perche' e' l'unico che spedisce davvero. Il
+ * mailer su file resta per lo sviluppo e per le verifiche di flusso, dove
+ * serve poter LEGGERE cio' che sarebbe stato spedito: un test che non puo'
+ * aprire il magic link non prova il percorso d'accesso.
+ *
+ * L'ordine mette SMTP per primo apposta. Al contrario, una macchina di
+ * produzione con per sbaglio `FANTACOMICS_MAIL_LOG` impostata scriverebbe i
+ * magic link su un file invece di spedirli — e ogni utente vedrebbe «ti
+ * abbiamo mandato una mail» senza riceverne nessuna.
  */
 function mailer(): Mailer {
+  const smtp = configSmtpDaAmbiente();
+  if (smtp) return new SmtpMailer(smtp);
   const path = process.env.FANTACOMICS_MAIL_LOG;
   return path ? new FileMailer(path) : new ConsoleMailer();
 }

@@ -132,6 +132,17 @@ jobs:
       FANTACOMICS_SECRET: chiave-di-prova-lunga-abbastanza-per-la-ci-000
       FANTACOMICS_MAIL_LOG: /tmp/posta.jsonl
       FANTACOMICS_URL: http://localhost:3000
+      # La posta finta della verifica. Da quando l'app in produzione si rifiuta
+      # di partire senza posta configurata — e `next start` gira sempre in
+      # produzione — senza qualcuno che risponda su SMTP non parte niente. La
+      # scelta era fra indebolire quella garanzia con un'eccezione e dare alle
+      # verifiche una posta vera: la seconda fa passare il percorso della posta
+      # da «non verificato» a «verificato a ogni giro».
+      SMTP_HOST: 127.0.0.1
+      SMTP_PORT: '4176'
+      SMTP_USER: finto
+      SMTP_PASSWORD: finta
+      SMTP_FROM: noreply@fantacomics.test
       # Il cron e il servizio finto della verifica della consegna automatica.
       # La porta e' fissa perche' l'app legge l'indirizzo all'avvio, cioe'
       # prima che il servizio esista.
@@ -166,10 +177,17 @@ jobs:
       - name: Build dell'app web
         run: pnpm --filter @fantacomics/web build
 
-      - name: Avvia l'app e il portale di prova
+      - name: Avvia l'app, il portale di prova e la posta finta
         env:
           NODE_ENV: production
         run: |
+          # La posta PRIMA dell'app: all'avvio l'app prova le credenziali SMTP,
+          # e senza qualcuno che risponda si rifiuta di partire.
+          pnpm exec tsx apps/worker/src/scripts/posta-finta.ts > /tmp/posta.log 2>&1 &
+          for i in $(seq 1 20); do
+            (echo > /dev/tcp/127.0.0.1/4176) 2>/dev/null && break
+            sleep 0.5
+          done
           pnpm --filter @fantacomics/web start > /tmp/web.log 2>&1 &
           pnpm --filter @fantacomics/extension portale > /tmp/portale.log 2>&1 &
           for i in $(seq 1 40); do
@@ -183,7 +201,20 @@ jobs:
       - name: Asserzioni di sicurezza dell'app
         # Home protetta, magic link monouso, link aperto altrove che non apre
         # sessioni, isolamento fra account, revoca dello slug.
+        #
+        # Il magic link arriva adesso attraverso una conversazione SMTP vera,
+        # non scrivendo su un file: se la posta si rompe, questa verifica lo
+        # dice qui invece che al primo utente.
         run: node apps/web/smoke.mjs
+
+      - name: E il link e' passato davvero dalla posta
+        # Senza questo, un ripiego silenzioso sul FileMailer renderebbe verde
+        # una catena in cui la posta non e' mai stata interrogata.
+        run: |
+          grep -q 'posta finta su' /tmp/posta.log || { echo "la posta finta non e' partita"; cat /tmp/posta.log; exit 1; }
+          grep -q 'Posta via 127.0.0.1:4176' /tmp/web.log || { echo "l'app non ha usato SMTP"; exit 1; }
+          test -s /tmp/posta.jsonl || { echo "nessun messaggio consegnato"; exit 1; }
+          echo "Posta: $(wc -l < /tmp/posta.jsonl) messaggi passati da SMTP." 
 
       - name: Relay autenticato
         run: pnpm exec tsx apps/worker/src/scripts/verifica-relay.ts
@@ -290,3 +321,4 @@ jobs:
         run: |
           echo '--- app ---'; tail -50 /tmp/web.log || true
           echo '--- portale ---'; tail -20 /tmp/portale.log || true
+          echo '--- posta ---'; tail -20 /tmp/posta.log || true
