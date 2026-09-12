@@ -1,0 +1,54 @@
+import { PERSONAS } from '@fantacomics/editorial';
+import { renderPrintPage } from '@fantacomics/render';
+import { store } from '@/lib/store';
+import { edizioneLeggibile } from '@fantacomics/pipeline';
+
+export const dynamic = 'force-dynamic';
+const personaNames = Object.fromEntries(PERSONAS.map((p) => [p.id, p.name]));
+
+/** La versione broadsheet: stessa sorgente, impaginazione da stampa. */
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ slug: string; matchday: string }> },
+): Promise<Response> {
+  const { slug, matchday } = await params;
+  // L'indirizzo pubblico e' lo slug, non l'id interno: cosi' il link si revoca
+  // rigenerandolo, senza toccare la lega.
+  const config = await store.getConfigBySlug(slug);
+  if (!config) return new Response('Edizione non trovata', { status: 404 });
+  const published = await store.getEdition(config.leagueId, Number(matchday));
+  if (!published) return new Response('Edizione non trovata', { status: 404 });
+  /**
+   * Sotto soglia non si serve, e si risponde come a un'edizione che non c'e'.
+   *
+   * La confidenza veniva calcolata e poi ignorata da OGNI percorso di lettura:
+   * un'edizione con riconciliazione fallita finiva nel gruppo esattamente come
+   * una buona, e "meglio nessun giornale che un giornale sbagliato" era una
+   * frase senza codice sotto. Il 404 e' lo stesso di una lega altrui: chi ha
+   * il link non deve nemmeno sapere che esiste una bozza.
+   */
+  if (!edizioneLeggibile(published)) {
+    return new Response('Edizione non trovata', { status: 404 });
+  }
+
+  return new Response(renderPrintPage(published.edition, published.pack, { personaNames }), {
+    headers: {
+      'content-type': 'text/html; charset=utf-8',
+      /**
+       * Fuori dai motori di ricerca.
+       *
+       * Sta nell'header e non solo nel `<meta>` perche' le immagini e i PDF
+       * non hanno un head in cui metterlo, e perche' l'header vale anche per
+       * chi scarica il file senza renderizzarlo.
+       */
+      'x-robots-tag': 'noindex, nofollow, noarchive',
+      /**
+       * Come le due sorelle, e per la stessa ragione: l'indirizzo e' un
+       * segreto revocabile, e una risposta che resta in cache fa sopravvivere
+       * il vecchio link alla revoca. Questa route era l'unica delle tre a non
+       * dirlo, il che rendeva la revoca vera per due uscite su tre.
+       */
+      'cache-control': 'no-store',
+    },
+  });
+}

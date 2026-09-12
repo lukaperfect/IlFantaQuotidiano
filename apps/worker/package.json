@@ -1,0 +1,24 @@
+{
+  "name": "@fantacomics/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "dependencies": {
+    "@fantacomics/auth": "workspace:*",
+    "@fantacomics/billing": "workspace:*",
+    "@fantacomics/core": "workspace:*",
+    "@fantacomics/editorial": "workspace:*",
+    "@fantacomics/facts": "workspace:*",
+    "@fantacomics/ingest": "workspace:*",
+    "@fantacomics/llm": "workspace:*",
+    "@fantacomics/pipeline": "workspace:*",
+    "@fantacomics/render": "workspace:*",
+    "@fantacomics/scoring": "workspace:*",
+    "pg": "^8.13.1",
+    "playwright": "^1.49.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.10"
+  }
+}

@@ -1,0 +1,328 @@
+name: CI
+
+on:
+  # Solo main sui push: i branch di lavoro sono gia' coperti dal trigger
+  # pull_request, e tenere entrambi produce due run identiche per commit.
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verifica:
+    name: Typecheck e test
+    runs-on: ubuntu-latest
+
+    services:
+      # Senza un database vero i test dello store Postgres si saltano da soli
+      # e la meta' del contratto resta non verificata: qui gira davvero.
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    env:
+      # I test non usano il browser: solo la CLI lo fa, ed e' fuori dal
+      # percorso di CI. Scaricare Chromium a ogni run sarebbe puro spreco.
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      FANTACOMICS_TEST_DB: postgres://postgres:postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+
+      # Nessun `version`: l'action legge `packageManager` da package.json.
+      # Specificarli entrambi fa fallire l'action con "Multiple versions of
+      # pnpm specified", ed e' l'unica fonte di verita' che vogliamo.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Installa le dipendenze
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Verifica che i test Postgres non siano stati saltati
+        # Un contratto meta' saltato in silenzio e' peggio di nessun contratto:
+        # sembra verde senza aver verificato niente.
+        run: |
+          pnpm vitest run packages/pipeline/src/store.test.ts --reporter=json --outputFile=/tmp/store.json > /dev/null
+          node -e "
+            const r = require('/tmp/store.json');
+            const saltati = r.numPendingTests ?? 0;
+            if (saltati > 0) { console.error('Test saltati: ' + saltati + ' — il database non era raggiungibile.'); process.exit(1); }
+            console.log('Nessun test saltato: contratto verificato su tutte le implementazioni (memoria, file, Postgres).');
+          "
+
+
+      - name: Sintassi dei file JavaScript che girano nel browser
+        # Estensione e strumenti da console sono JavaScript semplice: `tsc` non
+        # li copre, quindi un errore di sintassi passerebbe fino al browser
+        # dell'utente. `--check` costa millisecondi e chiude quel buco.
+        run: |
+          for f in apps/extension/src/*.js strumenti/*.js; do
+            node --check "$f" || exit 1
+          done
+          node -e "JSON.parse(require('fs').readFileSync('apps/extension/manifest.json','utf8'))"
+          echo "Estensione: sintassi e manifest a posto."
+
+      - name: Build dell'app web
+        # `next build` e' l'unico controllo di tipi che copre apps/web: il
+        # tsconfig radice non include l'app, quindi senza questo passo un
+        # errore di tipo nell'app arriverebbe fino in produzione.
+        run: pnpm --filter @fantacomics/web build
+
+      - name: Primo numero di una lega nuova, dal file delle rose vero
+        # E' il caso commerciale che governa il progetto: un admin paga, carica
+        # il foglio, e il giornale deve uscire — senza storico, senza voti e
+        # senza calendario. Parte dal file vero committato come fixture, e
+        # controlla anche cio' che l'anteprima NON deve fare: scrivere nello
+        # storico, sporcare il corpus della rarita' o far avanzare il puntatore
+        # delle giornate.
+        run: pnpm exec tsx apps/worker/src/scripts/verifica-anteprima.ts
+
+      - name: Demo end-to-end
+        # Il vero test di integrazione: la pipeline di produzione deve
+        # produrre un giornale completo su piu' giornate consecutive.
+        run: pnpm demo -- --out ci-out --giornate 3
+
+      - name: Verifica che la demo abbia prodotto il giornale
+        run: |
+          test -s ci-out/giornale.html || { echo "giornale.html mancante o vuoto"; exit 1; }
+          test -s ci-out/giornale-stampa.html || { echo "giornale-stampa.html mancante"; exit 1; }
+          test "$(ls ci-out/card-*.svg | wc -l)" -ge 8 || { echo "card personali mancanti"; exit 1; }
+          echo "Artefatti verificati."
+
+  browser:
+    name: Sicurezza e catena dell'estensione, in un browser vero
+    runs-on: ubuntu-latest
+    needs: verifica
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+      FANTACOMICS_SECRET: chiave-di-prova-lunga-abbastanza-per-la-ci-000
+      FANTACOMICS_MAIL_LOG: /tmp/posta.jsonl
+      FANTACOMICS_URL: http://localhost:3000
+      # La posta finta della verifica. Da quando l'app in produzione si rifiuta
+      # di partire senza posta configurata — e `next start` gira sempre in
+      # produzione — senza qualcuno che risponda su SMTP non parte niente. La
+      # scelta era fra indebolire quella garanzia con un'eccezione e dare alle
+      # verifiche una posta vera: la seconda fa passare il percorso della posta
+      # da «non verificato» a «verificato a ogni giro».
+      SMTP_HOST: 127.0.0.1
+      SMTP_PORT: '4176'
+      SMTP_USER: finto
+      SMTP_PASSWORD: finta
+      SMTP_FROM: noreply@fantacomics.test
+      # Il tetto alle leghe di vetrina. E' anche il predefinito, ed e' scritto
+      # apposta: se la variabile non venisse letta, il conto tornerebbe lo
+      # stesso e non lo saprebbe nessuno.
+      FANTACOMICS_MAX_LEGHE_PROVA: '2'
+      # Il cron e il servizio finto della verifica della consegna automatica.
+      # La porta e' fissa perche' l'app legge l'indirizzo all'avvio, cioe'
+      # prima che il servizio esista.
+      FANTACOMICS_CRON_SECRET: segreto-del-cron-della-ci-abbastanza-lungo
+      FANTACOMICS_FONTE_URL: http://127.0.0.1:4174
+      # Lo Stripe finto della verifica del pagamento. La chiave e il segreto
+      # sono di prova e non valgono niente: servono solo perche' l'app si
+      # rifiuta — giustamente — di aprire l'endpoint senza un segreto.
+      STRIPE_SECRET_KEY: sk_test_finta_della_ci
+      STRIPE_WEBHOOK_SECRET: whsec_segreto_del_webhook_della_ci_lungo
+      STRIPE_API_BASE: http://127.0.0.1:4175
+      # NIENTE `NODE_ENV: production` a livello di job: farebbe installare a
+      # pnpm le sole dipendenze di produzione, e tsx, vitest e playwright
+      # sparirebbero prima ancora di arrivare al primo passo che li usa.
+      # Serve solo al processo del server, e sta li'.
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Installa le dipendenze
+        run: pnpm install --frozen-lockfile
+
+      - name: Installa Chromium
+        # Qui il browser serve davvero: senza, queste verifiche non esistono.
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Build dell'app web
+        run: pnpm --filter @fantacomics/web build
+
+      - name: Avvia l'app, il portale di prova e la posta finta
+        env:
+          NODE_ENV: production
+        run: |
+          # La posta PRIMA dell'app: all'avvio l'app prova le credenziali SMTP,
+          # e senza qualcuno che risponda si rifiuta di partire.
+          pnpm exec tsx apps/worker/src/scripts/posta-finta.ts > /tmp/posta.log 2>&1 &
+          for i in $(seq 1 20); do
+            (echo > /dev/tcp/127.0.0.1/4176) 2>/dev/null && break
+            sleep 0.5
+          done
+          pnpm --filter @fantacomics/web start > /tmp/web.log 2>&1 &
+          pnpm --filter @fantacomics/extension portale > /tmp/portale.log 2>&1 &
+          for i in $(seq 1 40); do
+            curl -sf http://localhost:3000/accedi > /dev/null && \
+            curl -sf http://127.0.0.1:4173/ > /dev/null && break
+            sleep 1
+          done
+          curl -sf http://localhost:3000/accedi > /dev/null || { cat /tmp/web.log; exit 1; }
+          curl -sf http://127.0.0.1:4173/ > /dev/null || { cat /tmp/portale.log; exit 1; }
+
+      - name: Asserzioni di sicurezza dell'app
+        # Home protetta, magic link monouso, link aperto altrove che non apre
+        # sessioni, isolamento fra account, revoca dello slug.
+        #
+        # Il magic link arriva adesso attraverso una conversazione SMTP vera,
+        # non scrivendo su un file: se la posta si rompe, questa verifica lo
+        # dice qui invece che al primo utente.
+        run: node apps/web/smoke.mjs
+
+      - name: E il link e' passato davvero dalla posta
+        # Senza questo, un ripiego silenzioso sul FileMailer renderebbe verde
+        # una catena in cui la posta non e' mai stata interrogata.
+        run: |
+          grep -q 'posta finta su' /tmp/posta.log || { echo "la posta finta non e' partita"; cat /tmp/posta.log; exit 1; }
+          grep -q 'Posta via 127.0.0.1:4176' /tmp/web.log || { echo "l'app non ha usato SMTP"; exit 1; }
+          test -s /tmp/posta.jsonl || { echo "nessun messaggio consegnato"; exit 1; }
+          echo "Posta: $(wc -l < /tmp/posta.jsonl) messaggi passati da SMTP." 
+
+      - name: Relay autenticato
+        run: pnpm exec tsx apps/worker/src/scripts/verifica-relay.ts
+
+      - name: Consegna automatica dal servizio, nei due numeri
+        # Il percorso che nessun umano guarda: un servizio risponde, la
+        # macchina a stati decide, il giornale esce da solo. Verifica anche
+        # che una giornata a META' NON venga pubblicata — su questo percorso
+        # non c'e' nessuno a fermarla.
+        #
+        # E copre entrambe le uscite: col calendario che dice «si comincia fra
+        # poche ore» il cron deve produrre una VIGILIA, senza far avanzare il
+        # puntatore delle giornate; con la giornata finita, il retrospettivo.
+        run: pnpm exec tsx apps/worker/src/scripts/verifica-fonte.ts
+
+      - name: La catena del pagamento, contro uno Stripe finto
+        # E' il percorso che decide se il prodotto incassa o viene regalato, e
+        # da qui api.stripe.com non e' raggiungibile: senza un finto sarebbe
+        # verificabile solo in produzione, cioe' non verificato.
+        #
+        # La firma del webhook non viene MAI disattivata: l'evento e' firmato
+        # con lo stesso HMAC che usa Stripe, e si prova che senza firma, con
+        # una firma altrui, col corpo manomesso e con una firma vecchia non
+        # succede niente.
+        run: pnpm exec tsx apps/worker/src/scripts/verifica-pagamento.ts
+
+      - name: Rose dal foglio della piattaforma, e primo numero
+        # Il file vero sta nel repository come fixture (lo ha autorizzato il
+        # proprietario della lega), e questa verifica lo carica davvero
+        # guidando il browser. Senza argomento usa un foglio generato con la
+        # stessa forma, cosi' vale anche dove il file non ci fosse.
+        #
+        # Arriva fino al primo numero: si preme il comando che fa uscire la
+        # vigilia e si legge il giornale all'indirizzo pubblico. Verifica anche
+        # che l'indirizzo del retrospettivo resti un 404, cioe' che i due
+        # numeri della settimana siano due risorse e non una sovrascritta.
+        run: >-
+          pnpm exec tsx apps/web/verifica-rose.mjs
+          packages/ingest/src/__fixtures__/rose-leghe-fantacalcio.xlsx
+
+      - name: Catena dell'estensione in Chromium
+        # Carica l'estensione vera in un browser vero contro un portale che
+        # scarica i propri dati come farebbe un sito: intercettazione,
+        # mappatura, relay, giornale pubblicato.
+        run: pnpm exec tsx apps/extension/test/verifica.ts
+
+      - name: Il raccoglitore da browser, su un sito finto
+        # `strumenti/raccogli-fonte.js` gira dove nessun test unitario arriva:
+        # la console di un browser, sulla pagina di qualcun altro. E' anche
+        # l'unico pezzo che maneggia dati altrui — la pagina di chi lo incolla,
+        # cookie esclusi — quindi qui si verifica pure che i valori dei campi
+        # che sembrano credenziali non finiscano nel file che ne esce.
+        run: pnpm exec tsx apps/worker/src/scripts/verifica-raccolta.ts
+
+      - name: PDF e PNG generati davvero con Chromium
+        # Il README promette un broadsheet A3 e le card in PNG. Erano l'unica
+        # uscita del prodotto che la CI non guardava: verificata a mano una
+        # volta e poi lasciata a se stessa, cioe' destinata a rompersi senza
+        # che nessuno se ne accorga. Qui Chromium c'e' gia': costa poco.
+        run: |
+          pnpm demo -- --out ci-assets --giornate 2 --assets
+          node -e "
+            const fs = require('fs');
+            const pdf = fs.readFileSync('ci-assets/giornale.pdf');
+            if (pdf.subarray(0, 5).toString() !== '%PDF-') {
+              console.error('giornale.pdf non e\' un PDF'); process.exit(1);
+            }
+            if (pdf.length < 20000) {
+              console.error('giornale.pdf troppo piccolo: ' + pdf.length + ' byte'); process.exit(1);
+            }
+            // Il formato e' una promessa del prodotto: broadsheet A3, non A4
+            // ingrandito. 297x420mm sono 841.89x1190.55 punti; Chromium
+            // arrotonda, quindi si verifica con tolleranza.
+            const box = /\/MediaBox\s*\[([^\]]+)\]/.exec(pdf.toString('latin1'));
+            if (!box) { console.error('MediaBox non trovato nel PDF'); process.exit(1); }
+            const [, , w, h] = box[1].trim().split(/\s+/).map(Number);
+            if (Math.abs(w - 841.89) > 3 || Math.abs(h - 1190.55) > 3) {
+              console.error('il PDF non e\' A3: ' + w + 'x' + h + ' punti'); process.exit(1);
+            }
+            const pagine = Number((/\/Count\s+(\d+)/.exec(pdf.toString('latin1')) ?? [])[1] ?? 0);
+            if (pagine < 1) { console.error('PDF senza pagine'); process.exit(1); }
+            // La demo rende un campione di card, non tutte: e' documentato nella
+            // CLI e il log lo dice. Qui si verifica il campione, non un numero
+            // che sembrava giusto.
+            const card = fs.readdirSync('ci-assets').filter((f) => /^card-.*\.png$/.test(f));
+            if (card.length < 3) { console.error('card PNG mancanti: ' + card.length); process.exit(1); }
+            if (!fs.existsSync('ci-assets/anteprima.png')) {
+              console.error('anteprima.png mancante'); process.exit(1);
+            }
+            for (const f of card) {
+              const b = fs.readFileSync('ci-assets/' + f);
+              if (b.subarray(1, 4).toString() !== 'PNG') {
+                console.error(f + ' non e\' un PNG'); process.exit(1);
+              }
+            }
+            console.log(
+              'PDF ' + pdf.length + ' byte, ' + pagine + ' pagine A3, ' +
+              card.length + ' card PNG: veri.'
+            );
+          "
+
+      - name: Log in caso di guasto
+        if: failure()
+        run: |
+          echo '--- app ---'; tail -50 /tmp/web.log || true
+          echo '--- portale ---'; tail -20 /tmp/portale.log || true
+          echo '--- posta ---'; tail -20 /tmp/posta.log || true

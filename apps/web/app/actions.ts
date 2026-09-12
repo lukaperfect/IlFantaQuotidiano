@@ -1,0 +1,599 @@
+'use server';
+
+import { redirect } from 'next/navigation';
+import { cookies } from 'next/headers';
+import { revalidatePath } from 'next/cache';
+import { DEFAULT_RULESET, LeagueRulesetSchema, safeName, stableHash } from '@fantacomics/core';
+import type { EditionKind } from '@fantacomics/core';
+import {
+  issueMagicLink, consumeMagicLink, ConsoleMailer, FileMailer, randomToken,
+  SmtpMailer, configSmtpDaAmbiente, MAGIC_LINK_TTL_MS, type Mailer,
+} from '@fantacomics/auth';
+import { authStore } from '@/lib/store';
+import { requireAccount, startSession, NONCE_COOKIE } from '@/lib/session';
+import {
+  importFromFiles, generateWorld, withOfficialScores, nudgeTeamToScore, AdapterError,
+  importaRoseXlsx, stagioneDi,
+} from '@fantacomics/ingest';
+import { puoCreareLegaDiProva, tettoLegheDiProva, runMatchdayPipeline, runAnteprimaPipeline } from '@fantacomics/pipeline';
+import { TemplateDriver, AnthropicDriver } from '@fantacomics/llm';
+import { creaSessioneCheckout } from '@fantacomics/billing';
+import { store } from '@/lib/store';
+
+export type EsitoAccesso = { ok: boolean; messaggio: string; linkSviluppo?: string };
+
+/**
+ * Il link di accesso in chiaro nell'interfaccia e' una comodita' di sviluppo
+ * e nient'altro: mostrarlo in produzione annullerebbe l'intero meccanismo,
+ * perche' chiunque conosca un'email potrebbe entrare senza leggerla.
+ */
+function mostraLinkInChiaro(): boolean {
+  return process.env.NODE_ENV !== 'production' && !process.env.FANTACOMICS_SECRET;
+}
+
+function baseUrl(): string {
+  return process.env.FANTACOMICS_URL ?? 'http://localhost:3000';
+}
+
+/**
+ * Quale posta si usa, in ordine di precedenza.
+ *
+ * SMTP quando e' configurato, perche' e' l'unico che spedisce davvero. Il
+ * mailer su file resta per lo sviluppo e per le verifiche di flusso, dove
+ * serve poter LEGGERE cio' che sarebbe stato spedito: un test che non puo'
+ * aprire il magic link non prova il percorso d'accesso.
+ *
+ * L'ordine mette SMTP per primo apposta. Al contrario, una macchina di
+ * produzione con per sbaglio `FANTACOMICS_MAIL_LOG` impostata scriverebbe i
+ * magic link su un file invece di spedirli — e ogni utente vedrebbe «ti
+ * abbiamo mandato una mail» senza riceverne nessuna.
+ */
+function mailer(): Mailer {
+  const smtp = configSmtpDaAmbiente();
+  if (smtp) return new SmtpMailer(smtp);
+  const path = process.env.FANTACOMICS_MAIL_LOG;
+  return path ? new FileMailer(path) : new ConsoleMailer();
+}
+
+export async function richiediAccesso(
+  _precedente: EsitoAccesso | null,
+  form: FormData,
+): Promise<EsitoAccesso> {
+  const email = String(form.get('email') ?? '');
+  const esito = await issueMagicLink(authStore, email);
+
+  if (!esito.ok) {
+    if (esito.reason === 'troppo-frequente') {
+      return { ok: false, messaggio: 'Hai gia\u2019 chiesto un link poco fa. Riprova tra un minuto.' };
+    }
+    return { ok: false, messaggio: 'Questa email non sembra valida.' };
+  }
+
+  /**
+   * Il nonce resta su QUESTO browser e non viaggia mai nel link.
+   * Al ritorno, il browser che lo presenta e' lo stesso che ha chiesto
+   * l'accesso e non serve altro; un browser che non ce l'ha non viene
+   * respinto — l'apertura da un altro dispositivo e' legittima e comune —
+   * ma deve passare da una conferma che dice a schermo in quale account
+   * sta per entrare. E' quella riga a rendere inutile inoltrare il link:
+   * chi lo riceve legge un indirizzo che non e' il suo.
+   */
+  (await cookies()).set(NONCE_COOKIE, esito.nonce, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    path: '/accedi',
+    maxAge: Math.floor(MAGIC_LINK_TTL_MS / 1000),
+  });
+
+  const link = `${baseUrl()}/accedi/${esito.token}`;
+  await mailer().send(
+    email,
+    'Il tuo accesso a FantaComics',
+    `Entra da qui (vale 15 minuti, una volta sola):\n${link}`,
+  );
+
+  /**
+   * Il messaggio e' identico che l'email fosse gia' registrata o meno.
+   * Distinguere i due casi rivelerebbe quali indirizzi hanno un account.
+   */
+  return {
+    ok: true,
+    messaggio: 'Se l\u2019indirizzo e\u2019 valido, il link di accesso e\u2019 partito. Controlla la posta.',
+    ...(mostraLinkInChiaro() ? { linkSviluppo: link } : {}),
+  };
+}
+
+/**
+ * Conferma esplicita dell'accesso da un dispositivo diverso da quello che ha
+ * chiesto il link.
+ *
+ * E' una SERVER ACTION e non una GET per una ragione sola: le server action
+ * sono POST con verifica dell'origine, quindi non si attivano navigando. Una
+ * GET che apre una sessione si attiva con un click su un link qualunque, ed
+ * e' esattamente cio' da cui questa pagina protegge.
+ */
+export async function confermaAccesso(token: string, _form: FormData): Promise<void> {
+  const esito = await consumeMagicLink(authStore, token);
+  if (!esito.ok) {
+    const motivo =
+      esito.reason === 'scaduto' ? 'scaduto'
+      : esito.reason === 'gia-usato' ? 'usato'
+      : 'sconosciuto';
+    redirect(`/accedi?errore=${motivo}`);
+  }
+  await startSession(esito.accountId);
+  (await cookies()).delete(NONCE_COOKIE);
+  redirect('/');
+}
+
+function driver() {
+  // Senza chiave si usa il driver template: il giornale esce comunque, piu'
+  // secco. Un prodotto settimanale che salta una settimana perde gli abbonati.
+  return process.env.ANTHROPIC_API_KEY ? new AnthropicDriver() : new TemplateDriver();
+}
+
+async function fileText(form: FormData, field: string): Promise<string> {
+  const value = form.get(field);
+  if (value instanceof File) return value.size > 0 ? value.text() : '';
+  return typeof value === 'string' ? value : '';
+}
+
+/** Un .xlsx di rose sta in poche decine di KB: oltre questo non e' quel file. */
+const MAX_BYTE_ROSE = 4 * 1024 * 1024;
+
+async function fileBytes(form: FormData, field: string): Promise<Buffer | null> {
+  const value = form.get(field);
+  if (!(value instanceof File) || value.size === 0) return null;
+  if (value.size > MAX_BYTE_ROSE) {
+    throw new AdapterError(
+      `Il file pesa ${Math.round(value.size / 1024)} KB: troppo per essere un foglio di rose.`,
+      'parse', false,
+    );
+  }
+  return Buffer.from(await value.arrayBuffer());
+}
+
+export type EsitoCreazione = { ok: boolean; messaggio: string };
+
+/**
+ * Perche' questa azione restituisce un esito invece di lasciar esplodere.
+ *
+ * Il modo piu' probabile di fallire qui e' un CSV che non corrisponde: una
+ * colonna con un altro nome, una riga senza playerId, dieci titolari invece di
+ * undici. L'importatore lo sa dire con precisione — "Riga 5 dei voti senza
+ * playerId", "La squadra t3 ha 10 titolari invece di 11" — e quei messaggi
+ * finivano tutti inghiottiti da una pagina d'errore generica.
+ *
+ * E' il caso in cui il messaggio giusto vale piu' di qualunque altra cosa:
+ * chi carica i file non ha modo di indovinare cosa non andava, e senza quel
+ * dettaglio l'unica strategia rimasta e' rinunciare.
+ */
+async function conEsito(lavoro: () => Promise<string>): Promise<EsitoCreazione | never> {
+  let destinazione: string;
+  try {
+    destinazione = await lavoro();
+  } catch (e) {
+    if (e instanceof AdapterError) return { ok: false, messaggio: e.message };
+    return {
+      ok: false,
+      messaggio: e instanceof Error ? e.message : 'Errore sconosciuto durante l\u2019import.',
+    };
+  }
+  // Fuori dal try: `redirect` funziona lanciando, e catturarlo qui lo
+  // trasformerebbe in un errore da mostrare all'utente.
+  redirect(destinazione);
+}
+
+/**
+ * Crea una lega dal foglio delle rose che la piattaforma gia' produce.
+ *
+ * E' l'onboarding piu' corto che esista per chi ha una lega vera: un file
+ * scaricato, nessuna colonna da preparare, e dall'altra parte esce la lega
+ * completa — squadre, rose, ruoli e prezzi d'asta. Il percorso dai CSV resta
+ * accanto: serve per le GIORNATE, che questo file non contiene.
+ */
+export async function creaLegaDaRose(
+  _precedente: EsitoCreazione | null,
+  form: FormData,
+): Promise<EsitoCreazione> {
+  return conEsito(async () => {
+    const account = await requireAccount();
+    const leagueName = safeName(String(form.get('leagueName') ?? ''), 60);
+    const season = String(form.get('season') ?? '2025-26');
+    const spice = Number(form.get('spice') ?? 2) as 1 | 2 | 3;
+
+    const bytes = await fileBytes(form, 'roseXlsx');
+    if (!bytes) throw new AdapterError('Serve il file delle rose (.xlsx).', 'parse', false);
+
+    const esito = importaRoseXlsx(bytes);
+
+    const leagueId = `lega-${stableHash(`${account.accountId}:${leagueName}:${season}`)}`;
+    const esistente = await store.getConfigForOwner(leagueId, account.accountId);
+    await store.saveConfig({
+      leagueId,
+      ownerId: account.accountId,
+      publicSlug: esistente?.publicSlug ?? randomToken(18),
+      relaySecret: esistente?.relaySecret ?? null,
+      leagueName, ruleset: esistente?.ruleset ?? DEFAULT_RULESET, spice,
+      createdAt: esistente?.createdAt ?? new Date().toISOString(),
+      lastMatchday: esistente?.lastMatchday ?? null,
+      // Dati dell'utente, non vetrina: non consuma slot e non ne apre.
+      origine: esistente?.origine ?? 'utente',
+    });
+
+    await store.saveRoster(leagueId, {
+      season,
+      importedAt: new Date().toISOString(),
+      source: 'xlsx-rose',
+      teams: esito.squadre.map((s) => ({
+        teamId: s.teamId,
+        teamName: s.teamName,
+        players: s.giocatori,
+      })),
+    });
+
+    revalidatePath('/');
+    return `/lega/${leagueId}`;
+  });
+}
+
+/** Crea una lega dai CSV esportati dalla piattaforma. */
+export async function creaLegaDaFile(
+  _precedente: EsitoCreazione | null,
+  form: FormData,
+): Promise<EsitoCreazione> {
+  return conEsito(async () => {
+  const account = await requireAccount();
+  const leagueName = safeName(String(form.get('leagueName') ?? ''), 60);
+  const matchday = Number(form.get('matchday') ?? 1);
+  const season = String(form.get('season') ?? '2025-26');
+  const spice = Number(form.get('spice') ?? 2) as 1 | 2 | 3;
+
+  const [votiCsv, formazioniCsv, calendarioCsv, roseCsv, classificaCsv] = await Promise.all([
+    fileText(form, 'voti'), fileText(form, 'formazioni'), fileText(form, 'calendario'),
+    fileText(form, 'rose'), fileText(form, 'classifica'),
+  ]);
+
+  // L'id include il proprietario: due utenti con lo stesso nome lega non
+  // devono finire sulla stessa riga.
+  const leagueId = `lega-${stableHash(`${account.accountId}:${leagueName}:${season}`)}`;
+  const { serieA, snapshot } = importFromFiles({
+    season, matchday, leagueId, leagueName,
+    votiCsv, formazioniCsv, calendarioCsv,
+    ...(roseCsv ? { roseCsv } : {}),
+    ...(classificaCsv ? { classificaCsv } : {}),
+  });
+
+  const esistente = await store.getConfigForOwner(leagueId, account.accountId);
+  await store.saveConfig({
+    leagueId,
+    ownerId: account.accountId,
+    publicSlug: esistente?.publicSlug ?? randomToken(18),
+    relaySecret: esistente?.relaySecret ?? null,
+    leagueName, ruleset: DEFAULT_RULESET, spice,
+    createdAt: esistente?.createdAt ?? new Date().toISOString(),
+    lastMatchday: esistente?.lastMatchday ?? null,
+    origine: esistente?.origine ?? 'utente',
+  });
+
+  /**
+   * ANCHE QUESTA STRADA PASSA DAL CANCELLO.
+   *
+   * E' il terzo percorso verso la stessa spesa — far girare il modello su una
+   * lega vera — e me lo ero dimenticato: l'avevo messo sul pianificatore e
+   * sulla vigilia a mano, e da qui si sarebbe continuato a pubblicare gratis
+   * caricando cinque CSV. Un controllo applicato su due percorsi su tre vale
+   * quanto il percorso che lascia aperto.
+   *
+   * La lega resta CREATA: si torna alla sua pagina, dove c'e' il pulsante per
+   * attivarla. Non si perde niente tranne il caricamento, e chi paga vede
+   * subito a cosa serviva.
+   */
+  if (!(await store.getEntitlement(leagueId, season))) {
+    revalidatePath('/');
+    return `/lega/${leagueId}`;
+  }
+
+  await runMatchdayPipeline({
+    snapshot, serieA, rules: DEFAULT_RULESET, store, driver: driver(), spice,
+  });
+
+  revalidatePath('/');
+  return `/lega/${leagueId}`;
+  });
+}
+
+/**
+ * Lega di prova con dati generati.
+ * Non e' una scorciatoia da demo: e' l'onboarding. Chiedere a un admin di
+ * esportare cinque CSV prima di avergli fatto vedere il prodotto e' il modo
+ * piu' sicuro di perderlo.
+ */
+export async function creaLegaDiProva(
+  _precedente: EsitoCreazione | null,
+  form: FormData,
+): Promise<EsitoCreazione> {
+  return conEsito(async () => {
+  const account = await requireAccount();
+  const leagueName = safeName(String(form.get('leagueName') ?? 'Lega di prova'), 60);
+  const teams = Math.max(4, Math.min(12, Number(form.get('teams') ?? 8)));
+  const spice = Number(form.get('spice') ?? 2) as 1 | 2 | 3;
+  /**
+   * LA LEGA DI PROVA NON PASSA DAL CANCELLO, ed e' una scelta.
+   *
+   * E' l'onboarding: chiedere cinque CSV o un file di rose a chi non ha ancora
+   * visto il prodotto e' il modo piu' sicuro di perderlo, e chiedergli 4,99
+   * euro prima di mostrarglielo lo e' ancora di piu'. I dati sono SINTETICI —
+   * squadre inventate, punteggi generati — quindi non e' il prodotto regalato:
+   * e' la vetrina.
+   *
+   * Il costo pero' e' reale: tre edizioni di otto pezzi ciascuna, con una
+   * chiave vera. Il tetto sta QUI, cioe' PRIMA di spendere: un controllo dopo
+   * la generazione direbbe di no avendo gia' pagato il conto.
+   */
+  const esito = puoCreareLegaDiProva(
+    await store.listLeagues(account.accountId), tettoLegheDiProva(),
+  );
+  /**
+   * Si LANCIA, perche' e' cosi' che questo modulo racconta un rifiuto
+   * spiegabile: `conEsito` trasforma il messaggio in un avviso sul modulo,
+   * che e' la stessa strada dei CSV con una colonna sbagliata. Restituire qui
+   * un esito salterebbe il redirect e lascerebbe l'utente su una pagina muta.
+   */
+  if (!esito.puo) throw new Error(esito.motivo);
+
+  const leagueId = `prova-${stableHash(`${leagueName}:${Date.now()}`)}`;
+
+  await store.saveConfig({
+    leagueId,
+    ownerId: account.accountId,
+    publicSlug: randomToken(18),
+    relaySecret: null,
+    leagueName, ruleset: DEFAULT_RULESET, spice,
+    createdAt: new Date().toISOString(), lastMatchday: null,
+    // Senza questo il tetto conterebbe zero per sempre, e sarebbe un limite
+    // che non limita niente mentre sembra esserci.
+    origine: 'prova',
+  });
+
+  // Tre giornate: con una sola non esistono archi narrativi da raccontare.
+  for (let matchday = 1; matchday <= 3; matchday++) {
+    let world = generateWorld({
+      seed: `${leagueId}-${matchday}`, teams, matchday,
+      scenarios: { formazioneNonSchierata: matchday === 2 },
+    });
+    if (matchday === 3) world = nudgeTeamToScore(world, 't1', 71.5, DEFAULT_RULESET, { strict: false });
+    world = withOfficialScores(world, DEFAULT_RULESET);
+
+    await runMatchdayPipeline({
+      snapshot: { ...world.snapshot, leagueId, leagueName },
+      serieA: world.serieA, rules: DEFAULT_RULESET, store, driver: driver(), spice,
+    });
+  }
+
+  revalidatePath('/');
+  return `/lega/${leagueId}`;
+  });
+}
+
+export type EsitoConfigurazione = { ok: boolean; messaggio: string };
+
+/**
+ * Aggiorna regolamento e piccante.
+ *
+ * Restituisce un esito invece di reindirizzare con un parametro in query:
+ * quel giro dipendeva dal fatto che la navigazione conservasse la query, e
+ * lasciava l'admin senza conferma quando non succedeva. Un salvataggio muto
+ * su una schermata di configurazione e' peggio di un errore visibile.
+ */
+export async function salvaConfigurazione(
+  _precedente: EsitoConfigurazione | null,
+  form: FormData,
+): Promise<EsitoConfigurazione> {
+  const account = await requireAccount();
+  const leagueId = String(form.get('leagueId') ?? '');
+  const config = await store.getConfigForOwner(leagueId, account.accountId);
+  if (!config) return { ok: false, messaggio: 'Lega non trovata.' };
+
+  try {
+    const ruleset = LeagueRulesetSchema.parse({
+      ...config.ruleset,
+      version: config.ruleset.version + 1,
+      goalThreshold: {
+        base: Number(form.get('sogliaBase') ?? config.ruleset.goalThreshold.base),
+        step: Number(form.get('sogliaStep') ?? config.ruleset.goalThreshold.step),
+      },
+      useAssists: form.get('assist') === 'on',
+      defenseModifier: {
+        ...config.ruleset.defenseModifier,
+        enabled: form.get('modificatore') === 'on',
+      },
+      captain: { ...config.ruleset.captain, enabled: form.get('capitano') === 'on' },
+    });
+
+    await store.saveConfig({
+      ...config,
+      ruleset,
+      spice: Number(form.get('spice') ?? config.spice) as 1 | 2 | 3,
+    });
+
+    revalidatePath(`/lega/${leagueId}`);
+    return {
+      ok: true,
+      messaggio: `Salvato. Regolamento versione ${ruleset.version}, vale dalla prossima edizione.`,
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      messaggio: e instanceof Error ? `Regolamento non valido: ${e.message}` : 'Errore sconosciuto.',
+    };
+  }
+}
+
+/**
+ * Genera o ruota la chiave con cui l'estensione parla di QUESTA lega.
+ *
+ * Perche' non riusare lo slug pubblico: concede un potere diverso. Lo slug fa
+ * leggere il giornale, questa fa entrare dati. Tenerli distinti significa che
+ * revocare la condivisione non spegne l'estensione e togliere l'estensione non
+ * rompe i link gia' mandati nel gruppo.
+ */
+export async function generaChiaveEstensione(form: FormData): Promise<void> {
+  const account = await requireAccount();
+  const leagueId = String(form.get('leagueId') ?? '');
+  const config = await store.getConfigForOwner(leagueId, account.accountId);
+  if (!config) redirect('/');
+
+  await store.saveConfig({ ...config, relaySecret: randomToken(24) });
+  revalidatePath(`/lega/${leagueId}`);
+  redirect(`/lega/${leagueId}`);
+}
+
+/** Revoca la chiave: l'estensione smette di poter mandare dati per questa lega. */
+export async function revocaChiaveEstensione(form: FormData): Promise<void> {
+  const account = await requireAccount();
+  const leagueId = String(form.get('leagueId') ?? '');
+  const config = await store.getConfigForOwner(leagueId, account.accountId);
+  if (!config) redirect('/');
+
+  await store.saveConfig({ ...config, relaySecret: null });
+  revalidatePath(`/lega/${leagueId}`);
+  redirect(`/lega/${leagueId}`);
+}
+
+/**
+ * AVVIA IL PAGAMENTO DI UNA LEGA.
+ *
+ * Crea la sessione di Checkout e manda l'admin su Stripe. Cio' che NON fa e'
+ * altrettanto importante: non tocca nessun diritto. L'attivazione arriva dal
+ * webhook firmato, perche' solo quello prova che il pagamento e' avvenuto —
+ * un ritorno sul `success_url` prova soltanto che il browser e' passato di li',
+ * e quell'indirizzo lo puo' aprire chiunque.
+ */
+export async function pagaLega(form: FormData): Promise<void> {
+  const account = await requireAccount();
+  const leagueId = String(form.get('leagueId') ?? '');
+  const config = await store.getConfigForOwner(leagueId, account.accountId);
+  if (!config) redirect('/');
+
+  const chiave = process.env.STRIPE_SECRET_KEY ?? '';
+  if (chiave === '') {
+    throw new AdapterError(
+      'Il pagamento non e\' configurato su questo server (manca STRIPE_SECRET_KEY).',
+      'parse', false,
+    );
+  }
+
+  const base = process.env.FANTACOMICS_URL ?? 'http://localhost:3000';
+  const season = stagioneDi(new Date());
+  const sessione = await creaSessioneCheckout(
+    {
+      chiave,
+      // L'indirizzo di Stripe e' configurabile: da qui `api.stripe.com` non e'
+      // raggiungibile, e un pagamento verificabile solo in produzione e' un
+      // pagamento non verificato.
+      ...(process.env.STRIPE_API_BASE ? { baseUrl: process.env.STRIPE_API_BASE } : {}),
+    },
+    {
+      leagueId,
+      leagueName: config.leagueName,
+      season,
+      successUrl: `${base}/lega/${leagueId}?pagamento=ok`,
+      cancelUrl: `${base}/lega/${leagueId}?pagamento=annullato`,
+      ...(account.email ? { email: account.email } : {}),
+    },
+  );
+
+  redirect(sessione.url);
+}
+
+/**
+ * FA USCIRE IL NUMERO DI VIGILIA.
+ *
+ * Basta il file delle rose: non serve nessuna giornata giocata, nessun voto e
+ * nessun calendario. E' il comando che rende l'anteprima raggiungibile subito
+ * dopo il caricamento delle rose — il momento in cui un cliente che ha appena
+ * pagato deve vedere un giornale.
+ *
+ * Il calendario, quando arrivera' dalla fonte automatica, aggiungera' gli
+ * accoppiamenti; senza, il numero esce sui soli fatti d'asta. Non e' un
+ * ripiego: l'asta E' una storia, e alla prima giornata e' l'unica che esiste.
+ */
+export async function generaVigilia(form: FormData): Promise<void> {
+  const account = await requireAccount();
+  const leagueId = String(form.get('leagueId') ?? '');
+  const config = await store.getConfigForOwner(leagueId, account.accountId);
+  if (!config) redirect('/');
+
+  /**
+   * Senza pagamento non esce niente, nemmeno a mano.
+   *
+   * Il cancello sta anche qui e non solo nel pianificatore perche' questo e' un
+   * secondo percorso verso la stessa spesa: far girare il modello. Un controllo
+   * applicato su uno dei due percorsi vale quanto il percorso che lascia
+   * aperto.
+   */
+  const season = stagioneDi(new Date());
+  if (!(await store.getEntitlement(leagueId, season))) redirect(`/lega/${leagueId}`);
+
+  const roster = await store.getRoster(leagueId);
+  // Senza rose non c'e' materia: si torna indietro senza fingere di aver fatto.
+  if (!roster) redirect(`/lega/${leagueId}`);
+
+  await runAnteprimaPipeline({
+    leagueId,
+    leagueName: config.leagueName,
+    roster,
+    // La vigilia riguarda la giornata che si sta per giocare, cioe' quella
+    // DOPO l'ultimo retrospettivo pubblicato.
+    matchday: (config.lastMatchday ?? 0) + 1,
+    fixtures: [],
+    store,
+    rulesetVersion: config.ruleset.version,
+    spice: config.spice,
+    driver: process.env.ANTHROPIC_API_KEY ? new AnthropicDriver() : new TemplateDriver(),
+    fallback: new TemplateDriver(),
+  });
+
+  revalidatePath(`/lega/${leagueId}`);
+  redirect(`/lega/${leagueId}`);
+}
+
+/**
+ * Approva un'edizione sotto soglia.
+ *
+ * Non alza la confidenza e non tocca il testo: registra che un umano l'ha
+ * guardata e ha detto che va bene. Rigenerare la giornata azzera
+ * l'approvazione, perche' il "va bene" riguardava quel giornale li'.
+ */
+export async function approvaEdizione(form: FormData): Promise<void> {
+  const account = await requireAccount();
+  const leagueId = String(form.get('leagueId') ?? '');
+  const matchday = Number(form.get('matchday') ?? 0);
+  const config = await store.getConfigForOwner(leagueId, account.accountId);
+  if (!config) redirect('/');
+
+  /**
+   * Il tipo arriva dal form e non si deduce: la vigilia e il retrospettivo
+   * della stessa giornata sono due edizioni, e un'approvazione che ignorasse
+   * il tipo pubblicherebbe quella sbagliata. Tutto cio' che non e' esattamente
+   * `anteprima` e' il retrospettivo, com'e' predefinito in ogni altro punto.
+   */
+  const tipo: EditionKind = form.get('tipo') === 'anteprima' ? 'anteprima' : 'giornale';
+  await store.approveEdition(leagueId, matchday, new Date().toISOString(), tipo);
+  revalidatePath(`/lega/${leagueId}`);
+  redirect(`/lega/${leagueId}`);
+}
+
+/** Rigenera lo slug pubblico: revoca ogni link condiviso in precedenza. */
+export async function rigeneraLink(form: FormData): Promise<void> {
+  const account = await requireAccount();
+  const leagueId = String(form.get('leagueId') ?? '');
+  const config = await store.getConfigForOwner(leagueId, account.accountId);
+  if (!config) redirect('/');
+
+  await store.saveConfig({ ...config, publicSlug: randomToken(18) });
+  revalidatePath(`/lega/${leagueId}`);
+  redirect(`/lega/${leagueId}`);
+}

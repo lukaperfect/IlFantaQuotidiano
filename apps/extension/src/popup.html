@@ -1,0 +1,56 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>FantaComics</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    width: 320px; margin: 0; padding: 14px;
+    font: 13px/1.45 ui-sans-serif, system-ui, sans-serif;
+    background: #f6f3ec; color: #17150f;
+  }
+  @media (prefers-color-scheme: dark) { body { background: #17150f; color: #f6f3ec; } }
+  h1 { font-size: 13px; letter-spacing: .14em; text-transform: uppercase; margin: 0 0 10px; }
+  label { display: block; margin: 8px 0 3px; font-size: 11px; opacity: .75; }
+  input { width: 100%; box-sizing: border-box; padding: 6px 7px; font: inherit;
+          border: 1px solid currentColor; background: transparent; color: inherit; }
+  button { font: inherit; padding: 7px 10px; border: 1px solid currentColor;
+           background: transparent; color: inherit; cursor: pointer; }
+  button.primario { background: #8c1c13; border-color: #8c1c13; color: #f6f3ec; }
+  button[disabled] { opacity: .45; cursor: default; }
+  .riga { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  ul { list-style: none; padding: 0; margin: 10px 0 0; }
+  li { display: flex; justify-content: space-between; padding: 3px 0;
+       border-bottom: 1px solid rgba(128,128,128,.25); }
+  .esito { margin-top: 10px; padding: 8px 9px; border-left: 3px solid #8c1c13;
+           background: rgba(128,128,128,.12); word-break: break-word; }
+  .nota { font-size: 11px; opacity: .7; margin-top: 12px; }
+  a { color: inherit; }
+</style>
+
+<h1>FantaComics</h1>
+
+<div id="config">
+  <label for="server">Indirizzo di FantaComics</label>
+  <input id="server" type="url" spellcheck="false">
+  <label for="chiave">Chiave della lega</label>
+  <input id="chiave" type="text" spellcheck="false" placeholder="dalla pagina della tua lega">
+  <div class="riga"><button id="salva">Salva</button></div>
+</div>
+
+<div class="riga">
+  <label for="giornata" style="margin:0;align-self:center">Giornata</label>
+  <input id="giornata" type="number" min="1" max="38" style="width:64px" value="1">
+  <button id="arma" class="primario">Cattura</button>
+  <button id="disarma">Ferma</button>
+</div>
+
+<ul id="elenco"></ul>
+<div id="azioni" class="riga"><button id="invia" disabled>Manda a FantaComics</button></div>
+<div id="esito" class="esito" hidden></div>
+
+<p class="nota">
+  Legge solo le risposte che la pagina ti ha già mostrato, e solo dopo
+  che premi Cattura. Nessuna password viene letta o custodita.
+</p>
+
+<script src="popup.js"></script>
